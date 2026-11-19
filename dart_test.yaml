@@ -1,0 +1,4 @@
+# live tests hit a real bridge; evidence, not regression
+tags:
+  live:
+    skip: "run with: flutter test --tags live"

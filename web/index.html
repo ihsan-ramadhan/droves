@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <base href="$FLUTTER_BASE_HREF">
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="Droves — your agent fleet, from any browser.">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <style>
+    html, body, flutter-view {
+      margin: 0;
+      padding: 0;
+      /* Chrome Android otherwise claims vertical pans and cancels Flutter's pointer stream mid-drag */
+      touch-action: none !important;
+      overscroll-behavior: none;
+      background: #F4EFE4;
+    }
+  </style>
+  <script>
+    // Flutter rewrites the viewport to maximum-scale=5.0 at startup; keep it locked
+    // so double-tap can't leave iOS zoomed with no way back
+    (function () {
+      var content =
+        'width=device-width, initial-scale=1.0, maximum-scale=1.0, ' +
+        'user-scalable=no, viewport-fit=cover';
+      function lockViewport() {
+        var meta = document.querySelector('meta[name="viewport"]');
+        if (!meta) {
+          meta = document.createElement('meta');
+          meta.setAttribute('name', 'viewport');
+          document.head.appendChild(meta);
+        }
+        if (meta.getAttribute('content') !== content) {
+          meta.setAttribute('content', content);
+        }
+        if (document.body) {
+          document.body.style.setProperty(
+            'touch-action',
+            'none',
+            'important'
+          );
+        }
+      }
+      lockViewport();
+      new MutationObserver(lockViewport).observe(document.head, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['content', 'name'],
+      });
+      window.addEventListener('load', lockViewport);
+    })();
+  </script>
+
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Droves">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+
+  <link rel="icon" type="image/png" href="favicon.png"/>
+  <title>Droves</title>
+  <link rel="manifest" href="manifest.json">
+</head>
+<body>
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+</html>
