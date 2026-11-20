@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../theme/tokens.dart';
@@ -48,14 +49,55 @@ class GitScreen extends StatefulWidget {
   State<GitScreen> createState() => _GitScreenState();
 }
 
-class _GitScreenState extends State<GitScreen> with BridgeAccess {
+class _GitScreenState extends State<GitScreen>
+    with BridgeAccess, WidgetsBindingObserver {
   List<DiffEntry> _entries = const [];
   String? _repo;
   bool _loading = true;
+  final Set<String> _selected = {};
+  bool _pulling = false;
+  String _messageDraft = '';
+  String get _draftKey => 'droves.commit_draft.${widget.workspace}';
   String? _error;
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _selected.clear();
+    SharedPreferences.getInstance().then((prefs) {
+      if (!mounted) return;
+      setState(() => _messageDraft = prefs.getString(_draftKey) ?? '');
+    });
+  }
+
+  Future<void> _saveDraft(String text) async {
+    _messageDraft = text;
+    final prefs = await SharedPreferences.getInstance();
+    if (text.trim().isEmpty) {
+      await prefs.remove(_draftKey);
+    } else {
+      await prefs.setString(_draftKey, text);
+    }
+  }
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted && _selected.isNotEmpty) {
+      setState(() => _selected.clear());
+    }
+  }
+
+  @override
   void onBridgeReady() => _load();
+
+  List<DiffEntry> get _selectedEntries =>
+      _entries.where((e) => _selected.contains(e.path)).toList();
 
   Future<void> _load() async {
     setState(() => _loading = true);
@@ -71,6 +113,8 @@ class _GitScreenState extends State<GitScreen> with BridgeAccess {
       setState(() {
         _entries = entries;
         _repo = r['repo_name'] as String?;
+        final paths = entries.map((e) => e.path).toSet();
+        _selected.retainWhere(paths.contains);
         _loading = false;
         _error = null;
       });
@@ -90,12 +134,79 @@ class _GitScreenState extends State<GitScreen> with BridgeAccess {
       'Fast-forward only. Stops if the branches diverged.',
     );
     if (ok != true) return;
+    setState(() => _pulling = true);
     try {
       final r = await bridge.call('git.pull', {
         'workspace_id': widget.workspace,
       });
       if (!mounted) return;
-      _toast((r['summary'] as String?) ?? 'Pulled');
+      _toast('Pull: ${(r['summary'] as String?) ?? 'Done'}');
+      await _load();
+    } catch (e) {
+      if (mounted) _toast('Pull failed: $e');
+    } finally {
+      if (mounted) setState(() => _pulling = false);
+    }
+  }
+
+  Future<void> _commit() async {
+    final selected = _selectedEntries;
+    if (selected.isEmpty) {
+      _toast('Select files to commit');
+      return;
+    }
+    final c = context.colors;
+    final controller = TextEditingController(text: _messageDraft);
+    final message = await showDialog<String>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        backgroundColor: c.paper,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(Radii.card),
+        ),
+        title: Text(
+          'Commit ${selected.length} file(s)',
+          style: nameStyle(context, size: 17),
+        ),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLines: 4,
+          style: monoStyle(context, size: 12),
+          decoration: const InputDecoration(hintText: 'Commit message'),
+          onChanged: _saveDraft,
+          onSubmitted: (v) => Navigator.of(dialog).pop(v.trim()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialog).pop(),
+            child: Text(
+              'Cancel',
+              style: monoStyle(context, size: 12, color: c.muted),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialog).pop(controller.text.trim()),
+            child: Text(
+              'Commit',
+              style: monoStyle(context, size: 12, color: c.ink),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (message == null || message.isEmpty || !mounted) return;
+    try {
+      final r = await bridge.call('git.commit.create', {
+        'workspace_id': widget.workspace,
+        'message': message,
+        'paths': selected.map((e) => e.path).toList(),
+      });
+      if (!mounted) return;
+      final sha = (r['sha'] as String?) ?? '';
+      _toast('Committed ${sha.length > 7 ? sha.substring(0, 7) : sha}'.trim());
+      await _saveDraft('');
+      _selected.clear();
       await _load();
     } catch (e) {
       if (mounted) _toast('$e');
@@ -123,17 +234,54 @@ class _GitScreenState extends State<GitScreen> with BridgeAccess {
         onPressed: () => Navigator.of(context).maybePop(),
       ),
       actions: [
-        IconButton(
-          icon: const Icon(Icons.arrow_downward, size: 20),
-          color: c.ink,
-          tooltip: 'Pull',
-          onPressed: _pull,
-        ),
-        IconButton(
-          icon: const Icon(Icons.refresh, size: 20),
-          color: c.ink,
-          tooltip: 'Refresh',
-          onPressed: _load,
+        if (_entries.isNotEmpty && _selected.length < _entries.length)
+          IconButton(
+            icon: const Icon(Icons.select_all, size: 20),
+            color: c.ink,
+            tooltip: 'Select all',
+            style: IconButton.styleFrom(splashFactory: NoSplash.splashFactory),
+            onPressed: () =>
+                setState(() => _selected.addAll(_entries.map((e) => e.path))),
+          ),
+        if (_selected.isNotEmpty)
+          IconButton(
+            icon: const Icon(Icons.deselect, size: 20),
+            color: c.ink,
+            tooltip: 'Unselect all',
+            style: IconButton.styleFrom(splashFactory: NoSplash.splashFactory),
+            onPressed: () => setState(() => _selected.clear()),
+          ),
+        if (_selected.isNotEmpty)
+          IconButton(
+            icon: const Icon(Icons.check, size: 20),
+            color: c.accent,
+            tooltip: 'Commit selected files',
+            style: IconButton.styleFrom(splashFactory: NoSplash.splashFactory),
+            onPressed: _commit,
+          ),
+        PopupMenuButton<String>(
+          icon: const Icon(Icons.more_vert, size: 20),
+          color: c.paper,
+          tooltip: 'Repository',
+          onSelected: (v) => v == 'pull' ? _pull() : _load(),
+          itemBuilder: (_) => [
+            PopupMenuItem(
+              value: 'refresh',
+              enabled: !_pulling,
+              child: Text(
+                'Refresh',
+                style: monoStyle(context, size: 12, color: c.ink),
+              ),
+            ),
+            PopupMenuItem(
+              value: 'pull',
+              enabled: !_pulling,
+              child: Text(
+                _pulling ? 'Pulling…' : 'Pull branch',
+                style: monoStyle(context, size: 12, color: c.ink),
+              ),
+            ),
+          ],
         ),
       ],
       child: _buildBody(context),
@@ -222,6 +370,17 @@ class _GitScreenState extends State<GitScreen> with BridgeAccess {
         itemBuilder: (_, i) {
           final e = _entries[i];
           return ListTile(
+            leading: Checkbox(
+              value: _selected.contains(e.path),
+              activeColor: c.accent,
+              onChanged: (checked) => setState(() {
+                if (checked == true) {
+                  _selected.add(e.path);
+                } else {
+                  _selected.remove(e.path);
+                }
+              }),
+            ),
             title: Text(e.path, style: monoStyle(context, size: 12)),
             subtitle: Text(
               e.kind == 'conflicted'
@@ -373,6 +532,7 @@ class CommitInfo {
     required this.subject,
     required this.author,
     required this.authoredAt,
+    this.tags = const [],
   });
 
   final String sha;
@@ -380,6 +540,7 @@ class CommitInfo {
   final String subject;
   final String author;
   final String authoredAt;
+  final List<String> tags;
 
   factory CommitInfo.fromJson(Map<String, dynamic> j) => CommitInfo(
     sha: (j['sha'] as String?) ?? '',
@@ -387,6 +548,7 @@ class CommitInfo {
     subject: (j['subject'] as String?) ?? '',
     author: (j['author'] as String?) ?? '',
     authoredAt: (j['authored_at'] as String?) ?? '',
+    tags: (j['tags'] as List?)?.cast<String>().toList() ?? const [],
   );
 }
 
@@ -506,6 +668,35 @@ class _CommitsScreenState extends State<CommitsScreen> with BridgeAccess {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                if (commit.tags.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Wrap(
+                      spacing: 4,
+                      children: [
+                        for (final tag in commit.tags)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: c.accent.withValues(alpha: 0.14),
+                              border: Border.all(color: c.accent),
+                              borderRadius: BorderRadius.circular(Radii.row),
+                            ),
+                            child: Text(
+                              tag,
+                              style: monoStyle(
+                                context,
+                                size: 10,
+                                color: c.accent,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
                 Text(commit.subject, style: nameStyle(context, size: 14.5)),
                 const SizedBox(height: 3),
                 Text(

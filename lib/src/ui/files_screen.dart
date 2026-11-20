@@ -1,4 +1,5 @@
 import 'package:material_ui/material_ui.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../theme/tokens.dart';
 import 'widgets.dart';
@@ -42,19 +43,45 @@ class _FilesScreenState extends State<FilesScreen> with BridgeAccess {
   bool _loading = true;
   bool _busy = false;
   String? _error;
+  static const _showHiddenKey = 'droves.files.show_hidden';
+  bool _showHidden = false;
+  late final Future<void> _prefsReady;
 
   @override
-  void onBridgeReady() => _load('');
+  void initState() {
+    super.initState();
+    _prefsReady = _loadShowHidden();
+  }
+
+  Future<void> _loadShowHidden() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _showHidden = prefs.getBool(_showHiddenKey) ?? false;
+    } catch (_) {
+      _showHidden = false;
+    }
+  }
+
+  @override
+  Future<void> onBridgeReady() async {
+    await _prefsReady;
+    if (!mounted) return;
+    await _load('');
+  }
 
   Future<void> _load(String path) async {
     setState(() => _loading = true);
     try {
-      final r = await bridge.listFiles(widget.workspace, path: path);
+      final r = await bridge.listFiles(
+        widget.workspace,
+        path: path,
+        showHidden: _showHidden,
+      );
       final entries =
           ((r['entries'] as List?) ?? const [])
               .cast<Map<String, dynamic>>()
               .map(FileEntry.fromJson)
-              .where((e) => !e.name.startsWith('.'))
+              .where((e) => _showHidden || !e.name.startsWith('.'))
               .toList()
             ..sort(
               (a, b) => a.isDir == b.isDir
@@ -77,6 +104,13 @@ class _FilesScreenState extends State<FilesScreen> with BridgeAccess {
   }
 
   String get _currentPath => _stackDirs.isEmpty ? '' : _stackDirs.last.path;
+  Future<void> _toggleHidden() async {
+    final next = !_showHidden;
+    setState(() => _showHidden = next);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_showHiddenKey, next);
+    await _load(_currentPath);
+  }
 
   Future<void> _open(FileEntry e) async {
     if (e.isDir) {
@@ -300,6 +334,17 @@ class _FilesScreenState extends State<FilesScreen> with BridgeAccess {
               child: Text('New folder', style: monoStyle(context, size: 12)),
             ),
           ],
+        ),
+        IconButton(
+          icon: Icon(
+            _showHidden
+                ? Icons.visibility_outlined
+                : Icons.visibility_off_outlined,
+            size: 20,
+          ),
+          color: c.ink,
+          tooltip: _showHidden ? 'Hide hidden files' : 'Show hidden files',
+          onPressed: _toggleHidden,
         ),
         IconButton(
           icon: _busy

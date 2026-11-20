@@ -135,6 +135,7 @@ changes the grid mid-session.
 | `git.pull` | `workspace_id` | `summary` |
 | `git.commits` | `workspace_id` | `commits`, `head` |
 | `git.commit` | `workspace_id`, `sha` | `entries`, `base` |
+| `git.commit.create` | `workspace_id`, `message`, `paths` | `ok`, `sha` |
 
 History entries use `id`, `role`, `kind` (`message`, `tool_call`,
 `tool_result`, `error`), `text`, optional `tool_name`, `is_error`, `text_bytes`

@@ -307,6 +307,19 @@ func (s *Server) gitCommits(ctx context.Context, p map[string]any) (any, error) 
 	if err != nil {
 		return nil, err
 	}
+	tags := map[string][]string{}
+	if refs, err := gitRun(ctx, root, "for-each-ref", "--format=%(refname:short) %(objectname) %(*objectname)", "refs/tags"); err == nil {
+		for _, line := range strings.Split(strings.TrimSpace(refs), "\n") {
+			parts := strings.Fields(line)
+			if len(parts) < 2 {
+				continue
+			}
+			tags[parts[1]] = append(tags[parts[1]], parts[0])
+			if len(parts) > 2 && parts[2] != "" {
+				tags[parts[2]] = append(tags[parts[2]], parts[0])
+			}
+		}
+	}
 	commits := make([]map[string]any, 0, 80)
 	for _, line := range strings.Split(out, "\n") {
 		fields := strings.SplitN(line, "\x1f", 5)
@@ -319,6 +332,7 @@ func (s *Server) gitCommits(ctx context.Context, p map[string]any) (any, error) 
 			"author":      fields[2],
 			"authored_at": fields[3],
 			"subject":     fields[4],
+			"tags":        tags[fields[0]],
 		})
 	}
 	head, _ := gitRun(ctx, root, "rev-parse", "HEAD")
@@ -379,4 +393,44 @@ func (s *Server) gitCommit(ctx context.Context, p map[string]any) (any, error) {
 		entries = append(entries, e)
 	}
 	return map[string]any{"entries": entries, "base": base}, nil
+}
+
+// gitCommitCreate stages the selected paths, then commits only those paths.
+// The user selects files explicitly; no implicit add of anything else.
+func (s *Server) gitCommitCreate(ctx context.Context, p map[string]any) (any, error) {
+	root, err := s.gitRoot(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+	message := strings.TrimSpace(asString(p, "message"))
+	if message == "" {
+		return nil, errors.New("commit message is required")
+	}
+	paths := asStrings(p, "paths")
+	if len(paths) == 0 {
+		return nil, errors.New("select at least one file")
+	}
+	relPaths := make([]string, 0, len(paths))
+	for _, path := range paths {
+		clean, err := safeRel(root, path)
+		if err != nil {
+			return nil, err
+		}
+		rel, err := filepath.Rel(root, clean)
+		if err != nil {
+			return nil, err
+		}
+		relPaths = append(relPaths, rel)
+	}
+	addArgs := append([]string{"add", "--"}, relPaths...)
+	if _, err := gitRun(ctx, root, addArgs...); err != nil {
+		return nil, err
+	}
+	commitArgs := append([]string{"commit", "--only", "-m", message, "--"}, relPaths...)
+	out, err := gitRun(ctx, root, commitArgs...)
+	if err != nil {
+		return nil, err
+	}
+	sha, _ := gitRun(ctx, root, "rev-parse", "HEAD")
+	return map[string]any{"ok": true, "output": strings.TrimSpace(out), "sha": strings.TrimSpace(sha)}, nil
 }

@@ -306,6 +306,8 @@ func (s *Server) dispatch(ctx context.Context, c *Client, req RPCRequest) (any, 
 		return s.gitCommits(ctx, p)
 	case "git.commit":
 		return s.gitCommit(ctx, p)
+	case "git.commit.create":
+		return s.gitCommitCreate(ctx, p)
 
 	case "file.list":
 		return s.fileList(p)
