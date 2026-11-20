@@ -56,6 +56,7 @@ class _GitScreenState extends State<GitScreen>
   bool _loading = true;
   final Set<String> _selected = {};
   bool _pulling = false;
+  bool _pushing = false;
   String _messageDraft = '';
   String get _draftKey => 'droves.commit_draft.${widget.workspace}';
   String? _error;
@@ -147,6 +148,51 @@ class _GitScreenState extends State<GitScreen>
       if (mounted) _toast('Pull failed: $e');
     } finally {
       if (mounted) setState(() => _pulling = false);
+    }
+  }
+
+  Future<void> _push() async {
+    final c = context.colors;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        backgroundColor: c.paper,
+        title: Text('Push this branch?', style: nameStyle(context, size: 16)),
+        content: Text(
+          'Pushes the current branch to origin. Commits local to this machine '
+          'leave the machine only when you confirm.',
+          style: monoStyle(context, size: 12, color: c.muted),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialog).pop(false),
+            child: Text('Cancel', style: monoStyle(context, size: 12)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialog).pop(true),
+            child: Text(
+              'Push',
+              style: monoStyle(context, size: 12, color: c.accent),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(() => _pushing = true);
+    try {
+      final r = await bridge.call('git.push', {
+        'workspace_id': widget.workspace,
+      });
+      if (!mounted) return;
+      final branch = (r['branch'] as String?) ?? '';
+      final summary = ((r['summary'] as String?) ?? 'Done').split('\n').last;
+      _toast('Push $branch: $summary');
+      await _load();
+    } catch (e) {
+      if (mounted) _toast('Push failed: $e');
+    } finally {
+      if (mounted) setState(() => _pushing = false);
     }
   }
 
@@ -264,7 +310,11 @@ class _GitScreenState extends State<GitScreen>
           icon: const Icon(Icons.more_vert, size: 20),
           color: c.paper,
           tooltip: 'Repository',
-          onSelected: (v) => v == 'pull' ? _pull() : _load(),
+          onSelected: (v) => switch (v) {
+            'pull' => _pull(),
+            'push' => _push(),
+            _ => _load(),
+          },
           itemBuilder: (_) => [
             PopupMenuItem(
               value: 'refresh',
@@ -279,6 +329,14 @@ class _GitScreenState extends State<GitScreen>
               enabled: !_pulling,
               child: Text(
                 _pulling ? 'Pulling…' : 'Pull branch',
+                style: monoStyle(context, size: 12, color: c.ink),
+              ),
+            ),
+            PopupMenuItem(
+              value: 'push',
+              enabled: !_pushing,
+              child: Text(
+                _pushing ? 'Pushing…' : 'Push branch',
                 style: monoStyle(context, size: 12, color: c.ink),
               ),
             ),

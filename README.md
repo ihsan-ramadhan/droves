@@ -33,7 +33,7 @@ bridge, the app opens but cannot log in or list anything.
 | Agents | Every agent known to the bridge, grouped by host |
 | Terminal | ANSI frames, server-side scrollback, shortcut keys, file and image paste; split, zoom, rename and close panes |
 | Chat | Transcript with tool calls, search, attachments, prompt sending; thinking behind a toggle |
-| Changes | Diff summary, per-file diff, stage/unstage, pull, commit history, and commits from selected files |
+| Changes | Diff summary, per-file diff, stage/unstage, pull, push, commit history, and commits from selected files |
 | Files & search | Browse, read, edit, create, move, delete, search names and contents |
 | Ranger | Bridge-hosted assistant with sessions and model selection |
 | Machines | Multiple saved bridges per device, with per-bridge hosts |

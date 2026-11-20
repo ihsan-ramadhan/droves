@@ -62,7 +62,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
   int _scrollOffset = 0;
   bool _showKeyBar = false;
   bool _hasSelection = false;
-  bool _wide = false;
+  bool _split = false;
   int _wideCols = 0;
   int _wideRows = 0;
   String _message = 'Opening terminal';
@@ -77,14 +77,15 @@ class _TerminalScreenState extends State<TerminalScreen> {
     _terminal = Terminal(maxLines: 20000, inputHandler: drovesInputHandler);
     _controller = TerminalController();
     _terminal.onOutput = (data) {
+      _pushGrid();
       _bridge
           .input(widget.pane.terminalId, _applyModifiers(data))
           .catchError((_) {});
     };
+    // a single pane owns the layout, so its grid follows the screen; a split
+    // pane mirrors herdr's grid and must never push a resize
     _terminal.onResize = (cols, rows, pw, ph) {
-      if (_attached && !_wide) {
-        _bridge.resize(widget.pane.terminalId, cols, rows).catchError((_) {});
-      }
+      if (_attached && !_split) _pushGrid(cols, rows);
     };
     _controller.addListener(() {
       if (!mounted) return;
@@ -118,15 +119,18 @@ class _TerminalScreenState extends State<TerminalScreen> {
       _sub = _bridge.frames
           .where((f) => f.terminalId == widget.pane.terminalId)
           .listen((frame) {
-            // the bridge repaints the visible pane grid; follow its size when a
-            // split, zoom or close changes it mid-session
-            if (frame.full &&
+            // the viewer always mirrors herdr's grid, split or not, and never
+            // pushes a resize back
+            if (_split &&
+                frame.full &&
                 frame.width > 0 &&
                 frame.height > 0 &&
-                (frame.width != _wideCols || frame.height != _wideRows)) {
+                (frame.width != _wideCols ||
+                    frame.height != _wideRows ||
+                    frame.split != _split)) {
               if (mounted) {
                 setState(() {
-                  _wide = true;
+                  _split = frame.split;
                   _wideCols = frame.width;
                   _wideRows = frame.height;
                 });
@@ -136,24 +140,29 @@ class _TerminalScreenState extends State<TerminalScreen> {
             _terminal.write(frame.bytes);
             if (!_attached && mounted) setState(() => _attached = true);
           });
-      final localCols = _terminal.viewWidth;
-      final localRows = _terminal.viewHeight;
       final attachment = await _bridge.attach(
         widget.pane.terminalId,
-        localCols,
-        localRows,
+        _terminal.viewWidth,
+        _terminal.viewHeight,
       );
       if (!mounted) return;
-      // the viewer mirrors herdr's real pane grid and scales it to fit; it must
-      // never resize the pane, or the desktop TUI shrinks when a phone attaches
-      final wide = attachment.cols > 0 && attachment.rows > 0;
-      if (wide) {
+      if (attachment.split && attachment.cols > 0 && attachment.rows > 0) {
         _terminal.resize(attachment.cols, attachment.rows);
+      } else {
+        // pre-attach onResize events were dropped; push the settled viewport so
+        // the bridge renders rows at the width xterm is actually drawing
+        await _bridge
+            .resize(
+              widget.pane.terminalId,
+              _terminal.viewWidth,
+              _terminal.viewHeight,
+            )
+            .catchError((_) {});
       }
       if (!mounted) return;
       setState(() {
         _scrollOffset = attachment.offset;
-        _wide = wide;
+        _split = attachment.split;
         _wideCols = attachment.cols;
         _wideRows = attachment.rows;
         _attached = true;
@@ -280,6 +289,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
   /// scrollback lives on the server; drags become scroll RPCs
   void _serverScroll(int lines) {
     if (lines == 0) return;
+    _pushGrid();
     _bridge
         .scroll(widget.pane.terminalId, lines, up: lines < 0)
         .then((offset) {
@@ -287,6 +297,17 @@ class _TerminalScreenState extends State<TerminalScreen> {
           setState(() => _scrollOffset = offset);
         })
         .catchError((_) {});
+  }
+
+  /// The bridge keeps one grid per terminal session, so a tablet/laptop resize
+  /// would otherwise leave this device sending nothing on its next interaction.
+  /// Re-assert this view's grid every time the user scrolls or types.
+  void _pushGrid([int? cols, int? rows]) {
+    if (!_attached || _split) return;
+    final c = cols ?? _terminal.viewWidth;
+    final r = rows ?? _terminal.viewHeight;
+    if (c < 2 || r < 2) return;
+    _bridge.resize(widget.pane.terminalId, c, r).catchError((_) {});
   }
 
   void _scrollToBottom() {
@@ -393,16 +414,25 @@ class _TerminalScreenState extends State<TerminalScreen> {
                   Positioned.fill(
                     child: LayoutBuilder(
                       builder: (context, constraints) {
-                        // JetBrains Mono advances 0.60em per cell; leave a
-                        // few pixels of slack so rounding never clips a column
-                        final fontSize = _wide && _wideCols > 0
-                            ? ((constraints.maxWidth - 4) / (_wideCols * 0.6))
-                                  .clamp(2.0, 12.0)
-                            : 12.0;
+                        // fill the pane: a narrow split pane grows its font, a
+                        // wide grid shrinks it; whichever side runs out first
+                        // decides, so the grid always fits without clipping
                         final usableHeight =
                             constraints.maxHeight -
                             MediaQuery.paddingOf(context).vertical;
-                        final lineHeight = _wide && _wideRows > 0
+                        final byWidth = _wideCols > 0
+                            ? (constraints.maxWidth - 4) / (_wideCols * 0.6)
+                            : 12.0;
+                        final byHeight = _wideRows > 0
+                            ? usableHeight / _wideRows / 1.2
+                            : 12.0;
+                        final fit = byWidth < byHeight ? byWidth : byHeight;
+                        // a split pane scales its whole grid down to fit; a
+                        // single pane keeps normal text and xterm's own grid
+                        final fontSize = _split
+                            ? fit.clamp(2.0, 12.0).toDouble()
+                            : 12.0;
+                        final lineHeight = _split && _wideRows > 0
                             ? (usableHeight / _wideRows / fontSize).clamp(
                                 1.2,
                                 8.0,
@@ -425,7 +455,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
                               'NotoColorEmoji',
                             ],
                           ),
-                          autoResize: !_wide,
+                          autoResize: !_split,
                           keyboardType: TextInputType.text,
                           autofocus: false,
                           // drags scroll the scrollback instead of feeding mouse reporting

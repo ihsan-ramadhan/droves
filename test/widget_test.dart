@@ -35,6 +35,7 @@ void main() {
       terminalId: 'term_1',
       width: 80,
       height: 24,
+      split: false,
       full: true,
       bytes: '\x1b[1mhi\x1b[0m',
     );

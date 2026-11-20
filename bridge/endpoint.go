@@ -141,24 +141,16 @@ func (e *ShellEndpoint) run() {
 	}
 }
 
-func (e *ShellEndpoint) wakeup() {
-	select {
-	case e.wake <- struct{}{}:
-	default:
-	}
-}
-
-// desktop interaction steals the shared pane geometry; reclaim the viewer's grid
-// only while this pane stays focused, otherwise the next resize reclaims it
+// The desktop can steal geometry while the viewer is idle. Reassert the
+// viewer's grid, but only while this pane still owns the focused surface.
 func (e *ShellEndpoint) reclaim() {
 	e.mu.Lock()
 	conn, bootID, paneID := e.conn, e.bootID, e.paneID
 	cols, rows := e.cols, e.rows
 	e.mu.Unlock()
-	if conn == nil || paneID == "" || cols < 2 || rows < 2 || e.herdr == nil {
+	if conn == nil || paneID == "" || cols < 2 || rows < 2 {
 		return
 	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	raw, err := e.herdr.Call(ctx, "pane.current", nil)
@@ -179,7 +171,6 @@ func (e *ShellEndpoint) reclaim() {
 	} else if id == "" && current.PaneID != paneID {
 		return
 	}
-
 	raw, err = e.herdr.Call(ctx, "pane.layout", map[string]any{"pane_id": paneID})
 	if err != nil {
 		return
@@ -204,7 +195,6 @@ func (e *ShellEndpoint) reclaim() {
 	if layout.Layout.Area.Width == cols && layout.Layout.Area.Height == rows {
 		return
 	}
-
 	e.mu.Lock()
 	if e.conn != conn || e.paneID != paneID || e.cols != cols || e.rows != rows {
 		e.mu.Unlock()
@@ -217,6 +207,13 @@ func (e *ShellEndpoint) reclaim() {
 	}
 	if err := writeResize(conn, cols, rows); err != nil {
 		e.drop(conn)
+	}
+}
+
+func (e *ShellEndpoint) wakeup() {
+	select {
+	case e.wake <- struct{}{}:
+	default:
 	}
 }
 

@@ -298,6 +298,58 @@ func (s *Server) gitPull(ctx context.Context, p map[string]any) (any, error) {
 	return map[string]any{"summary": summary}, nil
 }
 
+func (s *Server) gitPush(ctx context.Context, p map[string]any) (any, error) {
+	root, err := s.gitRoot(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+	branch := strings.TrimSpace(asString(p, "branch"))
+	if branch == "" {
+		out, err := gitRun(ctx, root, "symbolic-ref", "--short", "HEAD")
+		if err != nil {
+			return nil, errors.New("detached HEAD: name a branch to push")
+		}
+		branch = strings.TrimSpace(out)
+	}
+	remote := strings.TrimSpace(asString(p, "remote"))
+	if remote == "" {
+		remote = "origin"
+	}
+	cctx, cancel := context.WithTimeout(ctx, 180*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(cctx, "git", "push", remote, branch)
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "LC_ALL=C", "GIT_PAGER=cat")
+	var out, stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = strings.TrimSpace(out.String())
+		}
+		if msg == "" {
+			msg = err.Error()
+		}
+		return nil, errors.New(msg)
+	}
+	summary := strings.TrimSpace(stderr.String())
+	if summary == "" {
+		summary = strings.TrimSpace(out.String())
+	}
+	if summary == "" {
+		summary = "Everything up to date"
+	}
+	sha, _ := gitRun(ctx, root, "rev-parse", "HEAD")
+	return map[string]any{
+		"ok":      true,
+		"remote":  remote,
+		"branch":  branch,
+		"sha":     strings.TrimSpace(sha),
+		"summary": summary,
+	}, nil
+}
+
 func (s *Server) gitCommits(ctx context.Context, p map[string]any) (any, error) {
 	root, err := s.gitRoot(ctx, p)
 	if err != nil {

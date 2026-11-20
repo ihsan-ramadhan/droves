@@ -135,6 +135,7 @@ changes the grid mid-session.
 | `git.diff_file` | `workspace_id`, `path`, `kind` or `sha` + `mode: commit` | `patch` |
 | `git.file_action` | `workspace_id`, `path`, `action` (`stage`/`unstage`) | — |
 | `git.pull` | `workspace_id` | `summary` |
+| `git.push` | `workspace_id`, optional `remote`, `branch` | `ok`, `remote`, `branch`, `sha`, `summary` |
 | `git.commits` | `workspace_id` | `commits`, `head` |
 | `git.commit` | `workspace_id`, `sha` | `entries`, `base` |
 | `git.commit.create` | `workspace_id`, `message`, `paths` | `ok`, `sha` |

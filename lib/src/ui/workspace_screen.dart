@@ -106,7 +106,6 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> with BridgeAccess {
               ('Rename pane', 'rename'),
               ('Bring to front', 'focus'),
               ('Split right', 'split-right'),
-              ('Split down', 'split-down'),
               ('Zoom pane', 'zoom'),
               ('Close pane', 'close'),
             ])
@@ -139,14 +138,6 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> with BridgeAccess {
             widget.workspace.workspaceId,
             pane.paneId,
             'right',
-            cwd: pane.cwd,
-          );
-          if (mounted) setState(() => _activeTab = created.tabId);
-        case 'split-down':
-          final created = await bridge.splitPane(
-            widget.workspace.workspaceId,
-            pane.paneId,
-            'down',
             cwd: pane.cwd,
           );
           if (mounted) setState(() => _activeTab = created.tabId);

@@ -127,6 +127,7 @@ class TerminalFrame {
     required this.terminalId,
     required this.width,
     required this.height,
+    required this.split,
     required this.full,
     required this.bytes,
   });
@@ -134,6 +135,9 @@ class TerminalFrame {
   final String terminalId;
   final int width;
   final int height;
+
+  /// whether the pane shares its tab with other panes
+  final bool split;
   final bool full;
 
   /// UTF-8 ANSI text, already decoded from the bridge's base64 payload.
@@ -254,6 +258,7 @@ class Bridge {
             terminalId: terminal['terminal_id'] as String,
             width: (terminal['width'] as num).toInt(),
             height: (terminal['height'] as num).toInt(),
+            split: terminal['split'] == true,
             full: terminal['full'] == true,
             bytes: utf8.decode(base64Decode(b64), allowMalformed: true),
           ),

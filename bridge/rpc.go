@@ -272,12 +272,12 @@ func (s *Server) dispatch(ctx context.Context, c *Client, req RPCRequest) (any, 
 		if err != nil {
 			return nil, errors.New("terminal input is not base64")
 		}
-		if err := s.terms.Input(ctx, asString(p, "terminal_id"), string(raw)); err != nil {
+		if err := s.terms.Input(ctx, c, asString(p, "terminal_id"), string(raw)); err != nil {
 			return nil, err
 		}
 		return map[string]any{"ok": true}, nil
 	case "terminal.resize":
-		s.terms.Resize(asString(p, "terminal_id"), asInt(p, "cols", 80), asInt(p, "rows", 24))
+		s.terms.Resize(c, asString(p, "terminal_id"), asInt(p, "cols", 80), asInt(p, "rows", 24))
 		return map[string]any{"ok": true}, nil
 	case "terminal.scroll":
 		up := asString(p, "direction") != "down"
@@ -302,6 +302,8 @@ func (s *Server) dispatch(ctx context.Context, c *Client, req RPCRequest) (any, 
 		return s.gitFileAction(ctx, p)
 	case "git.pull":
 		return s.gitPull(ctx, p)
+	case "git.push":
+		return s.gitPush(ctx, p)
 	case "git.commits":
 		return s.gitCommits(ctx, p)
 	case "git.commit":

@@ -22,6 +22,23 @@ type Client struct {
 	once     sync.Once
 	terminal map[string]struct{}
 	mu       sync.Mutex
+	cols     int
+	rows     int
+}
+
+func (c *Client) grid() (int, int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.cols, c.rows
+}
+
+func (c *Client) setGrid(cols, rows int) {
+	if cols < 2 || rows < 2 {
+		return
+	}
+	c.mu.Lock()
+	c.cols, c.rows = cols, rows
+	c.mu.Unlock()
 }
 
 type RPCRequest struct {
