@@ -1,4 +1,6 @@
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart'
+    show LicenseEntryWithLineBreaks, LicenseRegistry, kIsWeb;
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:material_ui/material_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -17,6 +19,14 @@ import 'src/bridge/bridge.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  // OFL requires the notice to travel with the fonts, including inside the
+  // installed app; the license page is where a user can actually read it
+  LicenseRegistry.addLicense(() async* {
+    yield LicenseEntryWithLineBreaks(
+      const ['Droves bundled fonts'],
+      await rootBundle.loadString('assets/fonts/OFL.txt'),
+    );
+  });
   runApp(const DrovesApp());
 }
 

@@ -486,6 +486,20 @@ class SettingsScreen extends StatelessWidget {
             trailing: Icon(Icons.open_in_new, size: 16, color: c.muted),
             onTap: () => _openRepo(context),
           ),
+          ListTile(
+            title: Text('Licenses', style: monoStyle(context, size: 12)),
+            subtitle: Text(
+              'Apache-2.0, bundled fonts and package licenses',
+              style: monoStyle(context, size: 11, color: c.muted),
+            ),
+            trailing: Icon(Icons.description_outlined, size: 16, color: c.muted),
+            onTap: () => showLicensePage(
+              context: context,
+              applicationName: 'Droves',
+              applicationVersion: state.currentVersion,
+              applicationLegalese: '© 2026 Muhammad Ihsan Ramadhan',
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.all(Space.md),
             child: Text(

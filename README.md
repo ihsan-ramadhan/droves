@@ -245,6 +245,17 @@ flutter analyze
 flutter test
 ```
 
+CI always runs format, analyze and tests. The APK, web and iOS builds are gated:
+they run only when the changed paths can affect them (`lib/`, `test/`, `assets/`,
+`pubspec.*`, `analysis_options.yaml`, `ci.yml`, plus `android/`, `web/` or `ios/`
+for their own target), so a docs or installer commit skips them. APK and web
+build only on pushes to `main`; a pull request gets analyze and tests. iOS still
+builds on pull requests because there is no Mac in the loop otherwise. Gradle's
+caches and wrapper are cached across runs.
+
+Trigger a full build regardless of paths with `workflow_dispatch` on the CI
+workflow.
+
 Live and golden checks:
 
 ```sh
@@ -290,6 +301,19 @@ permanent URL that the installers and `update.json` can point at:
 
 The publish job builds `update.json` and `source.json` from the tag, so a release
 never ships a manifest that still points at the previous version.
+
+## License
+
+Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+The fonts in `assets/fonts/` are third-party and stay under the SIL Open Font
+License 1.1. Their notices and the full OFL text live in
+[assets/fonts/OFL.txt](assets/fonts/OFL.txt), which is bundled as an asset and
+shown under Settings → Licenses so the notice travels with every APK, IPA and
+web build. JetBrains Mono ships as a Nerd Font patched derivative, not the
+upstream family.
+
+Droves talks to herdr over its control socket and bundles none of its code.
 
 ## Docs
 
