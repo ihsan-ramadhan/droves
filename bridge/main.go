@@ -119,6 +119,7 @@ func main() {
 		defer cancel()
 		_ = httpSrv.Shutdown(shutdownCtx)
 	}()
+	go srv.watchAgentStatus(ctx)
 	log.Printf("listening on %s (herdr %s, web %s)", cfg.Addr, cfg.Socket, cfg.WebDir)
 	if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("listen: %v", err)
@@ -250,14 +251,9 @@ func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	// the web shell and the update manifest must never be served stale: a cached
-	// bootstrap keeps pointing at the previous build and the update prompt lies
-	switch filepath.Base(rel) {
-	case "index.html", "flutter_bootstrap.js", "flutter_service_worker.js", "version.json", "update.json":
-		w.Header().Set("Cache-Control", "no-cache")
-	default:
-		w.Header().Set("Cache-Control", "public, max-age=3600")
-	}
+	// the shell, bootstrap, service worker and hashed assets must move together:
+	// a cached main.dart.js can outlive its bootstrap and keep old UI alive for an hour after a deploy
+	w.Header().Set("Cache-Control", "no-cache")
 	http.ServeContent(w, r, full, st.ModTime(), f)
 }
 

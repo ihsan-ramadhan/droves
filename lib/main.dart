@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart'
     show LicenseEntryWithLineBreaks, LicenseRegistry, kIsWeb;
 import 'package:flutter/services.dart' show rootBundle;
@@ -16,6 +18,27 @@ import 'src/ui/inbox_screen.dart';
 import 'src/ui/widgets.dart';
 import 'src/updates.dart';
 import 'src/bridge/bridge.dart';
+
+bool shouldNotify(
+  TaskNotice notice, {
+  required bool enabled,
+  required bool hidden,
+  required bool completed,
+  required bool blocked,
+  required bool ranger,
+}) {
+  if (!enabled) return false;
+  final wanted = switch (notice.kind) {
+    'completed' => completed,
+    'blocked' => blocked,
+    'ranger' => ranger,
+    _ => false,
+  };
+  // blocked needs an answer, so it always notifies; completed is short-lived
+  // enough that the user should hear about it even with the app open
+  return wanted &&
+      (hidden || notice.kind == 'blocked' || notice.kind == 'completed');
+}
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -54,17 +77,21 @@ class _DrovesAppState extends State<DrovesApp> {
     });
   }
 
-  /// ranger notices are opt-in; a chat reply already reads on screen
+  /// completed and blocked always notify; ranger waits until the app is hidden
+  /// because its run already has a progress surface in the UI
   void _handleNotice(TaskNotice notice) {
     final s = _state;
-    if (!s.notificationsEnabled || s.foreground) return;
-    final wanted = switch (notice.kind) {
-      'completed' => s.notifyCompleted,
-      'blocked' => s.notifyBlocked,
-      'ranger' => s.notifyRanger,
-      _ => false,
-    };
-    if (wanted) NotificationService.instance.show(notice);
+    final hidden = kIsWeb ? platform.pageHidden : !s.foreground;
+    if (shouldNotify(
+      notice,
+      enabled: s.notificationsEnabled,
+      hidden: hidden,
+      completed: s.notifyCompleted,
+      blocked: s.notifyBlocked,
+      ranger: s.notifyRanger,
+    )) {
+      unawaited(NotificationService.instance.show(notice));
+    }
   }
 
   @override
@@ -114,7 +141,20 @@ class _ShellState extends State<Shell> {
   int _index = 0;
   AppState? _state;
   String? _notifiedUpdate;
+  bool _visibilityHooked = false;
   bool _notificationPrompted = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (kIsWeb && !_visibilityHooked) {
+      _visibilityHooked = true;
+      platform.onAppVisible(() {
+        if (!mounted || _state == null) return;
+        unawaited(_state!.checkForUpdates(silent: false));
+      });
+    }
+  }
 
   @override
   void didChangeDependencies() {
@@ -152,7 +192,7 @@ class _ShellState extends State<Shell> {
           ),
           duration: const Duration(seconds: 10),
           action: SnackBarAction(
-            label: 'Update',
+            label: kIsWeb ? 'Load update' : 'Update',
             onPressed: () => _installUpdate(update),
           ),
         ),
@@ -243,7 +283,7 @@ class _ShellState extends State<Shell> {
 
   void _installUpdate(UpdateInfo info) {
     if (kIsWeb) {
-      platform.reloadPage();
+      unawaited(platform.reloadPage());
       return;
     }
     final url = info.downloadUrl;

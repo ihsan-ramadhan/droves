@@ -80,6 +80,7 @@ class _GitScreenState extends State<GitScreen>
       await prefs.setString(_draftKey, text);
     }
   }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);

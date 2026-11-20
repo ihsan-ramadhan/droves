@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:material_ui/material_ui.dart';
 
 import '../model/app_state.dart';
@@ -30,7 +31,10 @@ class _ConnectScreenState extends State<ConnectScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_url.text.isEmpty) _url.text = AppScope.of(context).baseUrl;
+    if (_url.text.isNotEmpty) return;
+    final saved = AppScope.of(context).baseUrl;
+    // a browser is pinned to the origin that served this page
+    _url.text = kIsWeb ? Uri.base.origin : saved;
   }
 
   @override
@@ -110,7 +114,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
             'where they run. Nothing goes through a third party.',
             style: monoStyle(context, size: 12, color: c.muted),
           ),
-          if (AppScope.of(context).endpoints.isNotEmpty) ...[
+          if (!kIsWeb && AppScope.of(context).endpoints.isNotEmpty) ...[
             const SizedBox(height: Space.lg),
             LedgerLabel('Saved bridges'),
             const SizedBox(height: Space.xs),
@@ -122,33 +126,51 @@ class _ConnectScreenState extends State<ConnectScreen> {
               ),
           ],
           const SizedBox(height: Space.xl),
-          const _Step(
-            number: 1,
-            title: 'Start the bridge',
-            body: 'Run droves-bridge on that machine and leave it running.',
-          ),
-          const _Step(
-            number: 2,
-            title: 'Copy its private address',
-            body: 'In Tailscale, copy the MagicDNS name for that machine.',
-          ),
-          const _Step(
-            number: 3,
-            title: 'Copy the access token',
-            body: 'Open ~/.config/droves-bridge/token on that machine.',
-          ),
-          const _Step(
-            number: 4,
-            title: 'Fill in both fields',
-            body: 'Paste them below, then tap Connect.',
-            last: true,
-          ),
+          if (kIsWeb) ...[
+            const _Step(
+              number: 1,
+              title: 'Copy the access token',
+              body:
+                  'Open ~/.config/droves-bridge/token on the machine that '
+                  'serves this page.',
+            ),
+            const _Step(
+              number: 2,
+              title: 'Paste it below',
+              body:
+                  'Then tap Connect. Another machine has its own bridge page.',
+              last: true,
+            ),
+          ] else ...[
+            const _Step(
+              number: 1,
+              title: 'Start the bridge',
+              body: 'Run droves-bridge on that machine and leave it running.',
+            ),
+            const _Step(
+              number: 2,
+              title: 'Copy its private address',
+              body: 'In Tailscale, copy the MagicDNS name for that machine.',
+            ),
+            const _Step(
+              number: 3,
+              title: 'Copy the access token',
+              body: 'Open ~/.config/droves-bridge/token on that machine.',
+            ),
+            const _Step(
+              number: 4,
+              title: 'Fill in both fields',
+              body: 'Paste them below, then tap Connect.',
+              last: true,
+            ),
+          ],
           const SizedBox(height: Space.lg),
           _Field(
             label: 'Bridge address',
             hint: 'https://your-machine.tailnet.ts.net:13030',
             controller: _url,
-            keyboard: TextInputType.url,
+            keyboard: kIsWeb ? null : TextInputType.url,
+            readOnly: kIsWeb,
           ),
           const SizedBox(height: Space.md),
           _Field(
@@ -340,6 +362,7 @@ class _Field extends StatelessWidget {
     required this.controller,
     this.keyboard,
     this.obscure = false,
+    this.readOnly = false,
     this.trailing,
   });
 
@@ -348,6 +371,7 @@ class _Field extends StatelessWidget {
   final TextEditingController controller;
   final TextInputType? keyboard;
   final bool obscure;
+  final bool readOnly;
   final Widget? trailing;
 
   @override
@@ -362,6 +386,7 @@ class _Field extends StatelessWidget {
           controller: controller,
           keyboardType: keyboard,
           obscureText: obscure,
+          readOnly: readOnly,
           autocorrect: false,
           enableSuggestions: false,
           style: monoStyle(context, size: 13),

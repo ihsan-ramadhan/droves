@@ -15,7 +15,7 @@ RPC endpoint. The client implements this contract in
 | `GET /api/health` | `{"ok":true,"service":"droves-bridge","version":"…"}`; no auth |
 | `GET /droves/update.json` | in-app update manifest, served `no-cache` |
 | `GET /ws` | JSON RPC over WebSocket, authenticated by that cookie |
-| `/droves/` | Static web build, same origin as the API |
+| `/droves/` | Static web build, same origin as the API; served `no-cache` so a deploy cannot leave a stale bundle |
 | `POST /api/terminal-upload?filename=…` | Stage bytes for terminal paste; returns `{"path":"…"}` |
 | `POST /api/file/upload` | Write one workspace file (`workspace_id`, `directory`, `filename`) |
 | `POST /api/file/delete` | Delete a file (`workspace_id`, `path`) |
@@ -67,8 +67,10 @@ Other pushes use an event envelope:
 ```
 
 Task events carry `kind` (`completed`, `blocked`, `ranger`), `title`, `body`,
-and optionally `agent`, `workspace_id`, `tab_id`, `pane_id`. Ranger also pushes
-`{"assistant": {…}}` and `{"assistant_notification": {…}}` snapshots.
+and optionally `agent`, `workspace_id`, `tab_id`, `pane_id`. The bridge emits
+`completed` and `blocked` when a herdr pane leaves `working`; the first status
+snapshot only seeds state. Ranger also pushes `{"assistant": {…}}` and
+`{"assistant_notification": {…}}` snapshots.
 
 ## Methods
 

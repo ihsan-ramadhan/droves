@@ -230,18 +230,21 @@ class SettingsScreen extends StatelessWidget {
                 .push(MaterialPageRoute(builder: (_) => const RangerScreen())),
           ),
           Divider(color: c.rule, height: 1),
-          ListTile(
-            title: Text('Machines', style: nameStyle(context, size: 15)),
-            subtitle: Text(
-              'Switch the bridge every screen reads',
-              style: monoStyle(context, size: 11, color: c.muted),
+          // a browser can only reach the bridge that served it, so there is no other machine to switch to
+          if (!kIsWeb) ...[
+            ListTile(
+              title: Text('Machines', style: nameStyle(context, size: 15)),
+              subtitle: Text(
+                'Switch the bridge every screen reads',
+                style: monoStyle(context, size: 11, color: c.muted),
+              ),
+              trailing: const Icon(Icons.chevron_right, size: 18),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const ConnectionsScreen()),
+              ),
             ),
-            trailing: const Icon(Icons.chevron_right, size: 18),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const ConnectionsScreen()),
-            ),
-          ),
-          Divider(color: c.rule, height: 1),
+            Divider(color: c.rule, height: 1),
+          ],
           _Section('Bridge'),
           ListTile(
             title: Text('Endpoint', style: monoStyle(context, size: 12)),

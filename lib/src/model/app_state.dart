@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:material_ui/material_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -124,9 +125,12 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         // a corrupt entry must not cost the user the other endpoints
       }
     }
-    endpoints = saved;
+    // web cannot dial another origin, so a browser keeps only its own bridge
+    endpoints = kIsWeb
+        ? saved.where((e) => _sameOriginAsPage(e.url)).toList()
+        : saved;
     final stored = prefs.getInt(_kActive) ?? 0;
-    activeIndex = (stored >= 0 && stored < saved.length) ? stored : 0;
+    activeIndex = (stored >= 0 && stored < endpoints.length) ? stored : 0;
     notificationsEnabled = prefs.getBool(_kNotify) ?? true;
     notifyCompleted = prefs.getBool(_kNotifyCompleted) ?? true;
     notifyBlocked = prefs.getBool(_kNotifyBlocked) ?? true;
@@ -274,12 +278,28 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     await prefs.setInt(_kActive, activeIndex);
   }
 
+  /// a browser page can only reach the bridge that served it: the bridge sends no CORS headers, pins its WebSocket to the page's Origin and its session cookie is SameSite=Strict
+  bool _sameOriginAsPage(String url) {
+    final u = Uri.tryParse(url);
+    return u != null &&
+        u.scheme == Uri.base.scheme &&
+        u.host == Uri.base.host &&
+        u.port == Uri.base.port;
+  }
+
   /// re-adding the same URL replaces the stored token instead of growing the list
   Future<void> connect(String url, String password, {String label = ''}) async {
     final normalised = url.trim().endsWith('/') ? url.trim() : '${url.trim()}/';
     final uri = Uri.parse(normalised);
     if (!uri.hasScheme || uri.host.isEmpty) {
       throw BridgeError('Enter a host like https://machine.tailnet.ts.net');
+    }
+    if (kIsWeb && !_sameOriginAsPage(normalised)) {
+      throw BridgeError(
+        'This web page can only reach the bridge that served it '
+        '(${Uri.base.origin}). Open that machine\'s bridge page instead, '
+        'or use the app to switch machines.',
+      );
     }
     final trimmedToken = password.trim();
     final next = Bridge(uri);

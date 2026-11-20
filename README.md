@@ -31,9 +31,9 @@ bridge, the app opens but cannot log in or list anything.
 | --- | --- |
 | Inbox | Workspaces with a waiting-agent tally, agent status and quick open |
 | Agents | Every agent known to the bridge, grouped by host |
-| Terminal | ANSI frames, server-side scrollback, shortcut keys, file and image paste |
+| Terminal | ANSI frames, server-side scrollback, shortcut keys, file and image paste; split, zoom, rename and close panes |
 | Chat | Transcript with tool calls, search, attachments, prompt sending; thinking behind a toggle |
-| Changes | Diff summary, per-file diff, stage/unstage, pull, commit history |
+| Changes | Diff summary, per-file diff, stage/unstage, pull, commit history, and commits from selected files |
 | Files & search | Browse, read, edit, create, move, delete, search names and contents |
 | Ranger | Bridge-hosted assistant with sessions and model selection |
 | Machines | Multiple saved bridges per device, with per-bridge hosts |
@@ -127,7 +127,7 @@ flutter build web --release --base-href /droves/
 | Bridge URL | Connect screen | Scheme required; use the tailnet host, not loopback |
 | Access token | Connect screen | Exchanged for a session cookie; stored in local preferences |
 | Base path | Build time | `--base-href /droves/` for web |
-| Notification kinds | Settings | Completed, blocked, Ranger run |
+| Notification kinds | Settings | Completed, blocked, Ranger run; completed and blocked also arrive while the app is open |
 | Theme | Settings | Light, dark, follow system |
 | Auto reconnect | Settings | Retries after the app returns to the foreground |
 

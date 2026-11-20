@@ -112,10 +112,23 @@ ThemeData drovesTheme(Brightness brightness) {
   final base = ThemeData(
     useMaterial3: true,
     brightness: brightness,
-    colorScheme: ColorScheme.fromSeed(
-      seedColor: c.accent,
-      brightness: brightness,
-    ).copyWith(surface: c.paper, primary: c.accent, onSurface: c.ink),
+    colorScheme:
+        ColorScheme.fromSeed(
+          seedColor: c.accent,
+          brightness: brightness,
+        ).copyWith(
+          surface: c.paper,
+          primary: c.accent,
+          onSurface: c.ink,
+          // Android selection handles and the copy toolbar must not inherit the seed palette's pale tones; keep them readable on paper and terminal
+          secondary: c.accent,
+          onSecondary: c.paper,
+        ),
+    textSelectionTheme: TextSelectionThemeData(
+      cursorColor: c.accent,
+      selectionColor: c.accent.withValues(alpha: 0.35),
+      selectionHandleColor: c.accent,
+    ),
   );
   return base.copyWith(
     scaffoldBackgroundColor: c.paper,

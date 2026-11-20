@@ -2,11 +2,17 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:markdown/markdown.dart' as md;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/gestures.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import '../platform_web_stub.dart'
+    if (dart.library.js_interop) '../platform_web.dart'
+    as platform;
 import '../bridge/bridge.dart';
 import '../model/app_state.dart';
 import '../theme/tokens.dart';
@@ -88,11 +94,16 @@ class _ChatScreenState extends State<ChatScreen> {
   final List<StagedFile> _staged = [];
   Timer? _poll;
 
+  /// live pane status; widget.pane is only the snapshot from route creation
+  bool _agentActive = false;
+  String _agentStatus = 'unknown';
+
   Bridge get _bridge => AppScope.of(context).bridge!;
 
   @override
   void initState() {
     super.initState();
+    _agentStatus = widget.pane.agentStatus;
     final warm = _TranscriptCache.memory(_cacheKey);
     if (warm != null && warm.isNotEmpty) {
       _messages = warm;
@@ -121,18 +132,32 @@ class _ChatScreenState extends State<ChatScreen> {
       _input.selection = TextSelection.collapsed(offset: _input.text.length);
     });
     _load();
+    unawaited(_refreshAgentStatus());
     // no transcript subscription on the bridge; poll cheaply
-    _poll = Timer.periodic(
-      const Duration(seconds: 3),
-      (_) => _load(silent: true),
-    );
+    _poll = Timer.periodic(const Duration(seconds: 3), (_) {
+      _load(silent: true);
+      unawaited(_refreshAgentStatus());
+    });
     _scroll.addListener(_onScroll);
   }
 
   /// rebuild only on pinned-threshold crossings, not every scroll pixel
   void _onScroll() {
     final pinned = _atBottom;
-    if (pinned != _pinned) setState(() => _pinned = pinned);
+    if (pinned != _pinned || (pinned && _frozenEnd != null)) {
+      final thawing = pinned && _frozenEnd != null;
+      setState(() {
+        _pinned = pinned;
+        // reaching the tail by hand rejoins the live stream
+        if (pinned) _frozenEnd = null;
+      });
+      if (thawing) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!_scroll.hasClients) return;
+          _scroll.jumpTo(_scroll.position.maxScrollExtent);
+        });
+      }
+    }
     if (!pinned) {
       // freeze the right edge; new turns land outside the rendered slice
       if (_frozenEnd == null) setState(() => _frozenEnd = _messages.length);
@@ -226,6 +251,27 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  Future<void> _refreshAgentStatus() async {
+    try {
+      final panes = await _bridge.panes(widget.pane.workspaceId);
+      final live = panes.firstWhere(
+        (p) => p.paneId == widget.pane.paneId,
+        orElse: () => widget.pane,
+      );
+      final active = live.agentStatus == 'working';
+      if (!mounted ||
+          (active == _agentActive && live.agentStatus == _agentStatus)) {
+        return;
+      }
+      setState(() {
+        _agentActive = active;
+        _agentStatus = live.agentStatus;
+      });
+    } catch (_) {
+      // best-effort poll; keep the last known status when the bridge is down
+    }
+  }
+
   bool get _atBottom {
     if (!_scroll.hasClients) return true;
     final p = _scroll.position;
@@ -313,6 +359,7 @@ class _ChatScreenState extends State<ChatScreen> {
       _staged.clear();
       await _DraftStore.clear(_draftKey);
       await Future<void>.delayed(const Duration(milliseconds: 400));
+      unawaited(_refreshAgentStatus());
       await _load(silent: true);
     } catch (e) {
       if (mounted) {
@@ -334,7 +381,7 @@ class _ChatScreenState extends State<ChatScreen> {
       title: widget.label,
       subtitle: Row(
         children: [
-          StatusWord(widget.pane.agentStatus),
+          StatusWord(_agentStatus),
           const SizedBox(width: Space.sm),
           Text(
             widget.pane.agent ?? 'agent',
@@ -391,6 +438,7 @@ class _ChatScreenState extends State<ChatScreen> {
             controller: _input,
             focusNode: _inputFocus,
             sending: _sending,
+            active: _agentActive,
             onSend: _send,
             onInterrupt: _interrupt,
             onAttach: _attach,
@@ -913,7 +961,7 @@ class _LatestButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.colors;
     return Material(
-      color: c.ink,
+      color: c.accent,
       borderRadius: BorderRadius.circular(Radii.row),
       child: InkWell(
         onTap: onTap,
@@ -937,8 +985,23 @@ class _LatestButton extends StatelessWidget {
   }
 }
 
-/// splits [text] around case-insensitive [query] hits for highlight backgrounds
-List<TextSpan> _highlightSpans(
+final _urlPattern = RegExp(
+  r'(?:(?:https?|ftp)://|www\.)[^\s<>"\`]+',
+  caseSensitive: false,
+);
+
+Future<void> _openLink(String raw) async {
+  final uri = Uri.tryParse(raw);
+  if (uri == null || (!uri.hasScheme && !raw.startsWith('www.'))) return;
+  final target = raw.startsWith('www.') ? Uri.parse('https://$raw') : uri;
+  if (kIsWeb) {
+    platform.openExternalLink(target);
+    return;
+  }
+  await launchUrl(target, mode: LaunchMode.externalApplication);
+}
+
+List<TextSpan> _plainSpans(
   String text,
   String query,
   TextStyle style,
@@ -965,6 +1028,46 @@ List<TextSpan> _highlightSpans(
   }
   if (start < text.length) {
     spans.add(TextSpan(text: text.substring(start), style: style));
+  }
+  return spans.isEmpty ? [TextSpan(text: text, style: style)] : spans;
+}
+
+/// splits [text] around URLs (tappable) and case-insensitive [query] hits
+List<TextSpan> _highlightSpans(
+  String text,
+  String query,
+  TextStyle style,
+  Color background,
+) {
+  final spans = <TextSpan>[];
+  var start = 0;
+  for (final match in _urlPattern.allMatches(text)) {
+    if (match.start > start) {
+      spans.addAll(
+        _plainSpans(
+          text.substring(start, match.start),
+          query,
+          style,
+          background,
+        ),
+      );
+    }
+    final url = match.group(0)!;
+    final recognizer = TapGestureRecognizer()..onTap = () => _openLink(url);
+    spans.add(
+      TextSpan(
+        text: url,
+        style: style.copyWith(
+          color: style.color,
+          decoration: TextDecoration.underline,
+        ),
+        recognizer: recognizer,
+      ),
+    );
+    start = match.end;
+  }
+  if (start < text.length) {
+    spans.addAll(_plainSpans(text.substring(start), query, style, background));
   }
   return spans.isEmpty ? [TextSpan(text: text, style: style)] : spans;
 }
@@ -1037,6 +1140,9 @@ class _MessageBlock extends StatelessWidget {
               : MarkdownBody(
                   data: message.text,
                   selectable: true,
+                  onTapLink: (_, href, _) {
+                    if (href != null) unawaited(_openLink(href));
+                  },
                   styleSheet: _markdownStyle(context),
                   extensionSet: query.isEmpty
                       ? md.ExtensionSet.gitHubFlavored
@@ -1083,9 +1189,15 @@ class _UserBody extends StatelessWidget {
     final body = monoStyle(context, size: 12.5);
     final highlight = context.colors.accent.withValues(alpha: 0.3);
     if (names.isEmpty) {
-      return SelectableText.rich(
-        TextSpan(children: _highlightSpans(text, query, body, highlight)),
-        style: body,
+      return MarkdownBody(
+        data: text,
+        selectable: true,
+        styleSheet: _markdownStyle(context),
+        extensionSet: md.ExtensionSet.gitHubFlavored,
+        builders: {'pre': MermaidMarkdownBuilder()},
+        onTapLink: (_, href, _) {
+          if (href != null) unawaited(_openLink(href));
+        },
       );
     }
     return Column(
@@ -1450,6 +1562,7 @@ class _Composer extends StatelessWidget {
     required this.controller,
     required this.focusNode,
     required this.sending,
+    required this.active,
     required this.onSend,
     required this.onInterrupt,
     required this.onAttach,
@@ -1461,6 +1574,7 @@ class _Composer extends StatelessWidget {
   final TextEditingController controller;
   final FocusNode focusNode;
   final bool sending;
+  final bool active;
   final VoidCallback onSend;
   final VoidCallback onInterrupt;
   final VoidCallback onAttach;
@@ -1548,7 +1662,7 @@ class _Composer extends StatelessWidget {
                 ),
                 IconButton(
                   onPressed: onInterrupt,
-                  color: c.muted,
+                  color: active ? c.accent : c.muted,
                   tooltip: 'Interrupt (Esc)',
                   icon: const Icon(Icons.stop_circle_outlined, size: 20),
                 ),

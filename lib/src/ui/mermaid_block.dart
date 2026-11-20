@@ -6,7 +6,7 @@ import 'package:mermaid_flutter/mermaid_flutter.dart';
 
 import '../theme/tokens.dart';
 
-/// ```mermaid fences become pan/zoom diagrams; other `pre` blocks use the default renderer
+/// mermaid fences become diagrams; other code blocks render as selectable text
 class MermaidMarkdownBuilder extends MarkdownElementBuilder {
   MermaidMarkdownBuilder();
 
@@ -27,12 +27,26 @@ class MermaidMarkdownBuilder extends MarkdownElementBuilder {
         break;
       }
     }
-    if (code == null) return null;
-    final language = (code.attributes['class'] ?? '').split(' ');
-    if (!language.contains('language-mermaid')) return null;
-    final source = code.textContent.trim();
+    final source = code?.textContent.trim() ?? element.textContent.trim();
+    if (code != null &&
+        (code.attributes['class'] ?? '')
+            .split(' ')
+            .contains('language-mermaid') &&
+        source.isNotEmpty) {
+      return MermaidBlock(source: source);
+    }
     if (source.isEmpty) return null;
-    return MermaidBlock(source: source);
+    final c = context.colors;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(Space.sm),
+      decoration: BoxDecoration(
+        color: c.surface,
+        border: Border.all(color: c.rule),
+        borderRadius: BorderRadius.circular(Radii.row),
+      ),
+      child: SelectableText(source, style: monoStyle(context, size: 11.5)),
+    );
   }
 }
 
