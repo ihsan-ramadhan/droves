@@ -170,12 +170,38 @@ func (s *Server) dispatch(ctx context.Context, c *Client, req RPCRequest) (any, 
 	case "pane.focus":
 		return s.herdrResult(ctx, "pane.focus", map[string]any{"pane_id": asString(p, "pane_id")})
 	case "pane.close":
-		return s.herdrResult(ctx, "pane.close", map[string]any{"pane_id": asString(p, "pane_id")})
+		out, err := s.herdrResult(ctx, "pane.close", map[string]any{"pane_id": asString(p, "pane_id")})
+		s.terms.layoutChanged()
+		return out, err
 	case "pane.rename":
 		return s.herdrResult(ctx, "pane.rename", map[string]any{
 			"pane_id": asString(p, "pane_id"),
 			"label":   asString(p, "label"),
 		})
+	case "pane.split":
+		params := map[string]any{
+			"direction":      asString(p, "direction"),
+			"target_pane_id": asString(p, "pane_id"),
+			"workspace_id":   asString(p, "workspace_id"),
+			"focus":          true,
+		}
+		if cwd := asString(p, "cwd"); cwd != "" {
+			params["cwd"] = cwd
+		}
+		out, err := s.herdrResult(ctx, "pane.split", params)
+		s.terms.layoutChanged()
+		return out, err
+	case "pane.zoom":
+		mode := asString(p, "mode")
+		if mode == "" {
+			mode = "toggle"
+		}
+		out, err := s.herdrResult(ctx, "pane.zoom", map[string]any{
+			"pane_id": asString(p, "pane_id"),
+			"mode":    mode,
+		})
+		s.terms.layoutChanged()
+		return out, err
 	case "pane.send_text":
 		return s.herdrResult(ctx, "pane.send_text", map[string]any{
 			"pane_id": asString(p, "pane_id"),
@@ -227,10 +253,17 @@ func (s *Server) dispatch(ctx context.Context, c *Client, req RPCRequest) (any, 
 		return map[string]any{"agents": out}, nil
 
 	case "terminal.attach":
-		if err := s.terms.Attach(ctx, c, asString(p, "terminal_id"), asInt(p, "cols", 80), asInt(p, "rows", 24)); err != nil {
+		split, vcols, vrows, err := s.terms.Attach(ctx, c, asString(p, "terminal_id"), asInt(p, "cols", 80), asInt(p, "rows", 24))
+		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"ok": true}, nil
+		return map[string]any{
+			"ok":     true,
+			"offset": s.terms.Offset(asString(p, "terminal_id")),
+			"split":  split,
+			"cols":   vcols,
+			"rows":   vrows,
+		}, nil
 	case "terminal.detach":
 		s.terms.Detach(c, asString(p, "terminal_id"))
 		return map[string]any{"ok": true}, nil
@@ -248,10 +281,11 @@ func (s *Server) dispatch(ctx context.Context, c *Client, req RPCRequest) (any, 
 		return map[string]any{"ok": true}, nil
 	case "terminal.scroll":
 		up := asString(p, "direction") != "down"
-		if err := s.terms.Scroll(ctx, c, asString(p, "terminal_id"), asInt(p, "lines", 3), up); err != nil {
+		offset, err := s.terms.Scroll(ctx, c, asString(p, "terminal_id"), asInt(p, "lines", 3), up)
+		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"ok": true}, nil
+		return map[string]any{"ok": true, "offset": offset}, nil
 
 	case "agent_history.get":
 		return s.transcripts.Get(ctx, s, p)

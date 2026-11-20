@@ -24,32 +24,100 @@ type TerminalSession struct {
 	id     string
 	paneID string
 
-	mu      sync.Mutex
-	clients map[*Client]struct{}
-	cols    int
-	rows    int
-	offset  int
-	last    string
-	stopped bool
-	stop    chan struct{}
-	wake    chan struct{}
+	mu       sync.Mutex
+	clients  map[*Client]struct{}
+	cols     int
+	rows     int
+	paneCols int
+	paneRows int
+	sentCols int
+	sentRows int
+	sizeAt   time.Time
+	offset   int
+	last     string
+	stopped  bool
+	stop     chan struct{}
+	wake     chan struct{}
 }
 
 func NewTerminalManager(srv *Server) *TerminalManager {
 	return &TerminalManager{srv: srv, sessions: make(map[string]*TerminalSession)}
 }
 
-func (m *TerminalManager) Attach(ctx context.Context, c *Client, terminalID string, cols, rows int) error {
+// layoutChanged makes every open session re-read its pane size on the next repaint instead of waiting for the periodic refresh
+func (m *TerminalManager) layoutChanged() {
+	m.mu.Lock()
+	sessions := make([]*TerminalSession, 0, len(m.sessions))
+	for _, sess := range m.sessions {
+		sessions = append(sessions, sess)
+	}
+	m.mu.Unlock()
+	for _, sess := range sessions {
+		sess.mu.Lock()
+		sess.sizeAt = time.Time{}
+		sess.mu.Unlock()
+		sess.kick()
+	}
+}
+
+func (m *TerminalManager) splitPane(paneID string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	snap, err := m.srv.snapshot(ctx)
+	if err != nil {
+		return false
+	}
+	pane := snap.Pane(paneID)
+	if pane == nil {
+		return false
+	}
+	count := 0
+	for _, p := range snap.Panes {
+		if p.TabID == pane.TabID {
+			count++
+		}
+	}
+	return count > 1
+}
+
+func (m *TerminalManager) paneSize(ctx context.Context, paneID string) (int, int) {
+	raw, err := m.srv.herdr.Call(ctx, "pane.layout", map[string]any{"pane_id": paneID})
+	if err != nil {
+		return 0, 0
+	}
+	var layout struct {
+		Layout struct {
+			Panes []struct {
+				PaneID string `json:"pane_id"`
+				Rect   struct {
+					Width  int `json:"width"`
+					Height int `json:"height"`
+				} `json:"rect"`
+			} `json:"panes"`
+		} `json:"layout"`
+	}
+	if json.Unmarshal(raw, &layout) != nil {
+		return 0, 0
+	}
+	for _, p := range layout.Layout.Panes {
+		if p.PaneID == paneID {
+			return p.Rect.Width, p.Rect.Height
+		}
+	}
+	return 0, 0
+}
+
+func (m *TerminalManager) Attach(ctx context.Context, c *Client, terminalID string, cols, rows int) (bool, int, int, error) {
 	if terminalID == "" {
-		return errors.New("terminal_id is required")
+		return false, 0, 0, errors.New("terminal_id is required")
 	}
 	snap, err := m.srv.snapshot(ctx)
 	if err != nil {
-		return err
+		return false, 0, 0, err
 	}
 	pane := snap.PaneByTerminal(terminalID)
 	if pane == nil {
-		return fmt.Errorf("terminal %s is not attached to a pane", terminalID)
+		return false, 0, 0, fmt.Errorf("terminal %s is not attached to a pane", terminalID)
 	}
 	if cols < 2 {
 		cols = 100
@@ -84,10 +152,13 @@ func (m *TerminalManager) Attach(ctx context.Context, c *Client, terminalID stri
 		sess.rows = rows
 	}
 	sess.mu.Unlock()
-	c.addTerminal(terminalID)
-	m.srv.shell.Resize(pane.PaneID, cols, rows)
+	serverCols, serverRows := m.paneSize(ctx, pane.PaneID)
+	if serverCols <= 0 || serverRows <= 0 {
+		serverCols, serverRows = cols, rows
+	}
 	sess.kick()
-	return nil
+	split := m.splitPane(pane.PaneID)
+	return split, serverCols, serverRows, nil
 }
 
 func (m *TerminalManager) Detach(c *Client, terminalID string) {
@@ -143,9 +214,8 @@ func (m *TerminalManager) Resize(terminalID string, cols, rows int) {
 	sess.mu.Lock()
 	sess.cols = cols
 	sess.rows = rows
-	paneID := sess.paneID
 	sess.mu.Unlock()
-	m.srv.shell.Resize(paneID, cols, rows)
+	// the viewer resizes its own xterm grid; herdr's pane layout belongs to the desktop TUI and must not change when a phone attaches
 	sess.kick()
 }
 
@@ -159,12 +229,12 @@ func (m *TerminalManager) Input(ctx context.Context, terminalID, data string) er
 	return sess.input(ctx, data)
 }
 
-func (m *TerminalManager) Scroll(ctx context.Context, c *Client, terminalID string, lines int, up bool) error {
+func (m *TerminalManager) Scroll(ctx context.Context, c *Client, terminalID string, lines int, up bool) (int, error) {
 	m.mu.Lock()
 	sess := m.sessions[terminalID]
 	m.mu.Unlock()
 	if sess == nil {
-		return errors.New("terminal is not attached")
+		return 0, errors.New("terminal is not attached")
 	}
 	if lines <= 0 {
 		lines = 3
@@ -185,13 +255,26 @@ func (m *TerminalManager) Scroll(ctx context.Context, c *Client, terminalID stri
 		"offset_from_bottom": offset,
 	})
 	if err != nil {
-		return err
+		return 0, err
 	}
 	sess.mu.Lock()
 	sess.last = "\x00force"
 	sess.mu.Unlock()
 	sess.kick()
-	return nil
+	return offset, nil
+}
+
+// offset reports how far the viewport is from the live tail.
+func (m *TerminalManager) Offset(terminalID string) int {
+	m.mu.Lock()
+	sess := m.sessions[terminalID]
+	m.mu.Unlock()
+	if sess == nil {
+		return 0
+	}
+	sess.mu.Lock()
+	defer sess.mu.Unlock()
+	return sess.offset
 }
 
 func (s *TerminalSession) kick() {
@@ -253,13 +336,31 @@ func (s *TerminalSession) repaint(ctx context.Context) error {
 		s.last = text
 	}
 	cols, rows := s.cols, s.rows
+	paneCols, paneRows, sizeAt := s.paneCols, s.paneRows, s.sizeAt
 	clients := make([]*Client, 0, len(s.clients))
 	for c := range s.clients {
 		clients = append(clients, c)
 	}
 	s.mu.Unlock()
+	// herdr owns the pane grid; the viewer must follow it when a split, zoom or
+	// close changes the pane size while a session is already open
+	if paneCols <= 0 || paneRows <= 0 || time.Since(sizeAt) > 2*time.Second {
+		if pc, pr := s.mgr.paneSize(ctx, s.paneID); pc > 0 && pr > 0 {
+			cols, rows = pc, pr
+			s.mu.Lock()
+			s.paneCols, s.paneRows, s.sizeAt = pc, pr, time.Now()
+			s.mu.Unlock()
+		}
+	} else {
+		cols, rows = paneCols, paneRows
+	}
 	if !changed {
-		return nil
+		s.mu.Lock()
+		resized := cols != s.sentCols || rows != s.sentRows
+		s.mu.Unlock()
+		if !resized {
+			return nil
+		}
 	}
 	if cols < 2 {
 		cols = 100
@@ -277,6 +378,9 @@ func (s *TerminalSession) repaint(ctx context.Context) error {
 		"full":        true,
 		"bytes":       b64,
 	}}
+	s.mu.Lock()
+	s.sentCols, s.sentRows = cols, rows
+	s.mu.Unlock()
 	for _, c := range clients {
 		c.enqueue(payload, false)
 	}

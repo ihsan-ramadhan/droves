@@ -90,6 +90,8 @@ and optionally `agent`, `workspace_id`, `tab_id`, `pane_id`. Ranger also pushes
 | `pane.focus` | `pane_id` | — |
 | `pane.rename` | `pane_id`, `label` | — |
 | `pane.close` | `pane_id` | — |
+| `pane.split` | `workspace_id`, `pane_id`, `direction` (`right`/`down`), `cwd?` | `pane_info` |
+| `pane.zoom` | `pane_id`, `mode` (`toggle`/`on`/`off`) | `pane_zoom` |
 | `pane.send_text` | `pane_id`, `text` | — |
 | `pane.send_input` | `pane_id`, `text`, `keys` | — |
 | `pane.send_keys` | `pane_id`, `keys` | — |
@@ -103,14 +105,22 @@ Pane records expose `pane_id`, `terminal_id`, `workspace_id`, `tab_id`,
 
 | Method | Parameters |
 | --- | --- |
-| `terminal.attach` | `terminal_id`, `cols`, `rows` |
+| `terminal.attach` | `terminal_id`, `cols`, `rows`; returns `offset`, `split`, `cols`, `rows` |
 | `terminal.detach` | `terminal_id` |
 | `terminal.input` | `terminal_id`, base64 `data` |
 | `terminal.resize` | `terminal_id`, `cols`, `rows` |
 | `terminal.scroll` | `terminal_id`, `direction` (`up`/`down`), `lines`, `source` |
 
 Paste uses bracketed-paste markers around `terminal.input`; the bridge forwards
-bytes to the pane unchanged.
+bytes to the pane unchanged. `terminal.attach` and `terminal.scroll` return the
+current `offset` from the live tail, so clients show "go to latest" only when
+the viewport is away from the tail.
+
+`terminal.attach` always reports the pane's current `cols`/`rows`. The bridge
+never resizes the herdr pane layout from a viewer, whether the tab is split or
+not, so a phone attaching cannot change the desktop geometry. Frames carry the
+pane's current `width`/`height`; clients follow them when a split, zoom or close
+changes the grid mid-session.
 
 ### Transcript and Git
 

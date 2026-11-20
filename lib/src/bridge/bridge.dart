@@ -420,12 +420,22 @@ class Bridge {
         .toList();
   }
 
-  Future<void> attach(String terminalId, int cols, int rows) async {
-    await call('terminal.attach', {
+  Future<({int offset, bool split, int cols, int rows})> attach(
+    String terminalId,
+    int cols,
+    int rows,
+  ) async {
+    final r = await call('terminal.attach', {
       'terminal_id': terminalId,
       'cols': cols,
       'rows': rows,
     });
+    return (
+      offset: (r['offset'] as num?)?.toInt() ?? 0,
+      split: r['split'] == true,
+      cols: (r['cols'] as num?)?.toInt() ?? 0,
+      rows: (r['rows'] as num?)?.toInt() ?? 0,
+    );
   }
 
   Future<void> detach(String terminalId) async {
@@ -447,14 +457,15 @@ class Bridge {
     });
   }
 
-  /// server-side scrollback; the bridge repaints, the client holds no history
-  Future<void> scroll(String terminalId, int lines, {required bool up}) async {
-    await call('terminal.scroll', {
+  /// server-side scrollback; returns the offset from the live tail
+  Future<int> scroll(String terminalId, int lines, {required bool up}) async {
+    final r = await call('terminal.scroll', {
       'terminal_id': terminalId,
       'direction': up ? 'up' : 'down',
       'lines': lines.abs(),
       'source': 'wheel',
     });
+    return (r['offset'] as num?)?.toInt() ?? 0;
   }
 
   Future<void> sendText(String paneId, String text) async {
@@ -512,6 +523,25 @@ class Bridge {
 
   Future<void> focusPane(String paneId) async {
     await call('pane.focus', {'pane_id': paneId});
+  }
+
+  Future<PaneInfo> splitPane(
+    String workspaceId,
+    String paneId,
+    String direction, {
+    String? cwd,
+  }) async {
+    final r = await call('pane.split', {
+      'workspace_id': workspaceId,
+      'pane_id': paneId,
+      'direction': direction,
+      if (cwd != null && cwd.isNotEmpty) 'cwd': cwd,
+    });
+    return PaneInfo.fromJson(r['pane'] as Map<String, dynamic>);
+  }
+
+  Future<void> zoomPane(String paneId, {String mode = 'toggle'}) async {
+    await call('pane.zoom', {'pane_id': paneId, 'mode': mode});
   }
 
   Future<void> createTab(

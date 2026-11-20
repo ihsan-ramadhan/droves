@@ -190,9 +190,15 @@ func (e *ShellEndpoint) reclaim() {
 				Width  int `json:"width"`
 				Height int `json:"height"`
 			} `json:"area"`
+			Panes []struct {
+				PaneID string `json:"pane_id"`
+			} `json:"panes"`
 		} `json:"layout"`
 	}
 	if json.Unmarshal(raw, &layout) != nil {
+		return
+	}
+	if len(layout.Layout.Panes) > 1 {
 		return
 	}
 	if layout.Layout.Area.Width == cols && layout.Layout.Area.Height == rows {

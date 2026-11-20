@@ -38,9 +38,18 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> with BridgeAccess {
       setState(() {
         _tabs = tabs;
         _panes = panes;
-        _activeTab =
-            widget.workspace.activeTabId ??
-            (tabs.isEmpty ? null : tabs.first.tabId);
+        final current = _activeTab;
+        if (current != null && tabs.any((t) => t.tabId == current)) {
+          _activeTab = current;
+        } else {
+          final preferred = widget.workspace.activeTabId;
+          _activeTab =
+              (preferred != null &&
+                  tabs.any((t) => t.tabId == preferred && t.paneCount > 0))
+              ? preferred
+              : tabs.where((t) => t.paneCount > 0).firstOrNull?.tabId ??
+                    (tabs.isEmpty ? null : tabs.first.tabId);
+        }
         _loading = false;
         _error = null;
       });
@@ -96,6 +105,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> with BridgeAccess {
             for (final item in [
               ('Rename pane', 'rename'),
               ('Bring to front', 'focus'),
+              ('Split right', 'split-right'),
+              ('Split down', 'split-down'),
+              ('Zoom pane', 'zoom'),
               ('Close pane', 'close'),
             ])
               ListTile(
@@ -122,6 +134,24 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> with BridgeAccess {
           await bridge.renamePane(pane.paneId, label);
         case 'focus':
           await bridge.focusPane(pane.paneId);
+        case 'split-right':
+          final created = await bridge.splitPane(
+            widget.workspace.workspaceId,
+            pane.paneId,
+            'right',
+            cwd: pane.cwd,
+          );
+          if (mounted) setState(() => _activeTab = created.tabId);
+        case 'split-down':
+          final created = await bridge.splitPane(
+            widget.workspace.workspaceId,
+            pane.paneId,
+            'down',
+            cwd: pane.cwd,
+          );
+          if (mounted) setState(() => _activeTab = created.tabId);
+        case 'zoom':
+          await bridge.zoomPane(pane.paneId);
         case 'close':
           final ok = await _confirm(
             context,
@@ -130,6 +160,78 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> with BridgeAccess {
           );
           if (ok != true || !mounted) return;
           await bridge.closePane(pane.paneId);
+      }
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+      _toast('$e');
+    }
+  }
+
+  Future<void> _tabActions(TabInfo tab) async {
+    final c = context.colors;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: c.paper,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(Radii.card)),
+      ),
+      builder: (sheet) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                Space.md,
+                Space.md,
+                Space.md,
+                Space.sm,
+              ),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: LedgerLabel(
+                  tab.label.isEmpty ? 'Tab ${tab.number}' : tab.label,
+                ),
+              ),
+            ),
+            for (final item in [
+              ('Focus tab', 'focus'),
+              ('Rename tab', 'rename'),
+              ('Close tab', 'close'),
+            ])
+              ListTile(
+                title: Text(
+                  item.$1,
+                  style: monoStyle(
+                    context,
+                    size: 12.5,
+                    color: item.$2 == 'close' ? c.accent : c.ink,
+                  ),
+                ),
+                onTap: () => Navigator.of(sheet).pop(item.$2),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (action == null || !mounted) return;
+    try {
+      switch (action) {
+        case 'focus':
+          setState(() => _activeTab = tab.tabId);
+          await bridge.call('tab.focus', {'tab_id': tab.tabId});
+        case 'rename':
+          final label = await _promptText(context, 'Rename tab', 'Label');
+          if (label == null || !mounted) return;
+          await bridge.renameTab(tab.tabId, label);
+        case 'close':
+          final ok = await _confirm(
+            context,
+            'Close this tab?',
+            'All panes in it will stop.',
+          );
+          if (ok != true || !mounted) return;
+          await bridge.closeTab(tab.tabId);
       }
       await _load();
     } catch (e) {
@@ -246,6 +348,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> with BridgeAccess {
                 return Center(
                   child: InkWell(
                     onTap: () => setState(() => _activeTab = tab.tabId),
+                    onLongPress: () => _tabActions(tab),
                     child: Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: Space.md,

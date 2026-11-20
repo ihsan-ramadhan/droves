@@ -59,7 +59,12 @@ class _TerminalScreenState extends State<TerminalScreen> {
   final Set<String> _latched = {};
   bool _attached = false;
   bool _uploading = false;
+  int _scrollOffset = 0;
   bool _showKeyBar = false;
+  bool _hasSelection = false;
+  bool _wide = false;
+  int _wideCols = 0;
+  int _wideRows = 0;
   String _message = 'Opening terminal';
 
   // initState/dispose can't touch inherited widgets; resolve once here
@@ -77,10 +82,15 @@ class _TerminalScreenState extends State<TerminalScreen> {
           .catchError((_) {});
     };
     _terminal.onResize = (cols, rows, pw, ph) {
-      if (_attached) {
+      if (_attached && !_wide) {
         _bridge.resize(widget.pane.terminalId, cols, rows).catchError((_) {});
       }
     };
+    _controller.addListener(() {
+      if (!mounted) return;
+      final has = _controller.selection != null;
+      if (has != _hasSelection) setState(() => _hasSelection = has);
+    });
     _restoreKeyBar();
   }
 
@@ -108,23 +118,44 @@ class _TerminalScreenState extends State<TerminalScreen> {
       _sub = _bridge.frames
           .where((f) => f.terminalId == widget.pane.terminalId)
           .listen((frame) {
-            // a frame repaints only the viewport; keep the `history` scrollback
+            // the bridge repaints the visible pane grid; follow its size when a
+            // split, zoom or close changes it mid-session
+            if (frame.full &&
+                frame.width > 0 &&
+                frame.height > 0 &&
+                (frame.width != _wideCols || frame.height != _wideRows)) {
+              if (mounted) {
+                setState(() {
+                  _wide = true;
+                  _wideCols = frame.width;
+                  _wideRows = frame.height;
+                });
+              }
+              _terminal.resize(frame.width, frame.height);
+            }
             _terminal.write(frame.bytes);
             if (!_attached && mounted) setState(() => _attached = true);
           });
-      await _bridge.attach(
+      final localCols = _terminal.viewWidth;
+      final localRows = _terminal.viewHeight;
+      final attachment = await _bridge.attach(
         widget.pane.terminalId,
-        _terminal.viewWidth,
-        _terminal.viewHeight,
-      );
-      // pre-attach onResize events were dropped; push the settled viewport size
-      await _bridge.resize(
-        widget.pane.terminalId,
-        _terminal.viewWidth,
-        _terminal.viewHeight,
+        localCols,
+        localRows,
       );
       if (!mounted) return;
+      // the viewer mirrors herdr's real pane grid and scales it to fit; it must
+      // never resize the pane, or the desktop TUI shrinks when a phone attaches
+      final wide = attachment.cols > 0 && attachment.rows > 0;
+      if (wide) {
+        _terminal.resize(attachment.cols, attachment.rows);
+      }
+      if (!mounted) return;
       setState(() {
+        _scrollOffset = attachment.offset;
+        _wide = wide;
+        _wideCols = attachment.cols;
+        _wideRows = attachment.rows;
         _attached = true;
         _message = '';
       });
@@ -225,6 +256,20 @@ class _TerminalScreenState extends State<TerminalScreen> {
     }
   }
 
+  Future<void> _copySelection() async {
+    final selection = _controller.selection;
+    if (selection == null) return;
+    final text = _terminal.buffer.getText(selection);
+    if (text.isEmpty) {
+      _toast('Nothing selected');
+      return;
+    }
+    await Clipboard.setData(ClipboardData(text: text));
+    _controller.clearSelection();
+    _focus.requestFocus();
+    _toast('Copied');
+  }
+
   void _toast(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -237,6 +282,10 @@ class _TerminalScreenState extends State<TerminalScreen> {
     if (lines == 0) return;
     _bridge
         .scroll(widget.pane.terminalId, lines, up: lines < 0)
+        .then((offset) {
+          if (!mounted) return;
+          setState(() => _scrollOffset = offset);
+        })
         .catchError((_) {});
   }
 
@@ -244,6 +293,10 @@ class _TerminalScreenState extends State<TerminalScreen> {
     // ask the server for the live tail; a local jump only moves the widget
     _bridge
         .scroll(widget.pane.terminalId, 1 << 20, up: false)
+        .then((offset) {
+          if (!mounted) return;
+          setState(() => _scrollOffset = offset);
+        })
         .catchError((_) {});
     if (!kIsWeb && _scroll.hasClients) {
       _scroll.animateTo(
@@ -312,6 +365,13 @@ class _TerminalScreenState extends State<TerminalScreen> {
           tooltip: 'Paste from clipboard',
           onPressed: _pasteFromClipboard,
         ),
+        if (_hasSelection)
+          IconButton(
+            icon: const Icon(Icons.copy, size: 20),
+            color: c.accent,
+            tooltip: 'Copy selection',
+            onPressed: _copySelection,
+          ),
         IconButton(
           icon: Icon(
             _showKeyBar ? Icons.keyboard_alt : Icons.keyboard_alt_outlined,
@@ -330,26 +390,50 @@ class _TerminalScreenState extends State<TerminalScreen> {
               color: c.terminalBg,
               child: Stack(
                 children: [
-                  TerminalView(
-                    _terminal,
-                    controller: _controller,
-                    scrollController: _scroll,
-                    focusNode: _focus,
-                    theme: _terminalTheme(c),
-                    textStyle: const TerminalStyle(
-                      fontSize: 12,
-                      fontFamily: 'JetBrainsMonoNerd',
-                      fontFamilyFallback: [
-                        'JetBrainsMonoNerd',
-                        'PlexMono',
-                        'NotoColorEmoji',
-                      ],
+                  Positioned.fill(
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        // JetBrains Mono advances 0.60em per cell; leave a
+                        // few pixels of slack so rounding never clips a column
+                        final fontSize = _wide && _wideCols > 0
+                            ? ((constraints.maxWidth - 4) / (_wideCols * 0.6))
+                                  .clamp(2.0, 12.0)
+                            : 12.0;
+                        final usableHeight =
+                            constraints.maxHeight -
+                            MediaQuery.paddingOf(context).vertical;
+                        final lineHeight = _wide && _wideRows > 0
+                            ? (usableHeight / _wideRows / fontSize).clamp(
+                                1.2,
+                                8.0,
+                              )
+                            : 1.2;
+                        return TerminalView(
+                          _terminal,
+                          controller: _controller,
+                          scrollController: _scroll,
+                          focusNode: _focus,
+                          theme: _terminalTheme(c),
+                          textScaler: TextScaler.noScaling,
+                          textStyle: TerminalStyle(
+                            fontSize: fontSize.toDouble(),
+                            height: lineHeight.toDouble(),
+                            fontFamily: 'JetBrainsMonoNerd',
+                            fontFamilyFallback: const [
+                              'JetBrainsMonoNerd',
+                              'PlexMono',
+                              'NotoColorEmoji',
+                            ],
+                          ),
+                          autoResize: !_wide,
+                          keyboardType: TextInputType.text,
+                          autofocus: false,
+                          // drags scroll the scrollback instead of feeding mouse reporting
+                          simulateScroll: true,
+                          backgroundOpacity: 1,
+                        );
+                      },
                     ),
-                    keyboardType: TextInputType.text,
-                    autofocus: false,
-                    // drags scroll the scrollback instead of feeding mouse reporting
-                    simulateScroll: true,
-                    backgroundOpacity: 1,
                   ),
                   if (!_attached)
                     ColoredBox(
@@ -373,7 +457,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
                     Positioned.fill(
                       child: _ServerScrollCatcher(onScroll: _serverScroll),
                     ),
-                  if (_attached)
+                  if (_attached && _scrollOffset > 0)
                     Positioned(
                       right: Space.sm,
                       bottom: Space.sm,
