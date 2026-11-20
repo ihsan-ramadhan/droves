@@ -98,7 +98,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
               const SizedBox(width: Space.md),
               Expanded(
                 child: Text(
-                  'Connect a computer',
+                  'Connect a machine',
                   style: nameStyle(context, size: 22),
                 ),
               ),
@@ -106,7 +106,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
           ),
           const SizedBox(height: Space.sm),
           Text(
-            'Droves reads your agents through a small bridge on the computer '
+            'Droves reads your agents through a small bridge on the machine '
             'where they run. Nothing goes through a third party.',
             style: monoStyle(context, size: 12, color: c.muted),
           ),
@@ -125,17 +125,17 @@ class _ConnectScreenState extends State<ConnectScreen> {
           const _Step(
             number: 1,
             title: 'Start the bridge',
-            body: 'Run droves-bridge on that computer and leave it running.',
+            body: 'Run droves-bridge on that machine and leave it running.',
           ),
           const _Step(
             number: 2,
             title: 'Copy its private address',
-            body: 'In Tailscale, copy the MagicDNS name for that computer.',
+            body: 'In Tailscale, copy the MagicDNS name for that machine.',
           ),
           const _Step(
             number: 3,
             title: 'Copy the access token',
-            body: 'Open ~/.config/droves-bridge/token on that computer.',
+            body: 'Open ~/.config/droves-bridge/token on that machine.',
           ),
           const _Step(
             number: 4,
@@ -256,7 +256,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
                   Align(
                     alignment: Alignment.centerLeft,
                     child: Text(
-                      'Run these on the computer that runs your agents:\n\n'
+                      'Run these on the machine that runs your agents:\n\n'
                       'droves-bridge\n'
                       'tailscale serve --bg 13030\n'
                       'cat ~/.config/droves-bridge/token',

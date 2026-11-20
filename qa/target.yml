@@ -1,0 +1,27 @@
+id: droves-android
+name: "Droves 0.1.0 — Android native (emulator)"
+platform: android
+domain: _default
+environment:
+  kind: local-dev
+device:
+  serial: emulator-5554
+app:
+  package: dev.droves.droves
+  apk_paths:
+    - build/app/outputs/flutter-apk/app-x86_64-release.apk
+source_repo:
+  path: /home/icqn/Projects/personal/droves
+safety:
+  read_only: false
+auth:
+  strategy: none
+  notes: "App already holds a saved endpoint + session cookie in preferences."
+notes: |
+  SUT is the native Flutter app driving a REAL bridge on the user's machine
+  (herdr backend, live agent panes). Treat all pre-existing workspaces, panes,
+  files and git state as READ-ONLY production data. Mutating tests (send
+  prompt, close pane, file write/delete, git stage) run ONLY inside a scratch
+  workspace created for this session (label qa-scratch). Never touch w1Q
+  (droves repo, live agent) or any other pre-existing workspace beyond
+  read-only viewing. Token lives in ~/.config/droves-bridge/token; never echo.

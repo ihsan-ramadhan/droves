@@ -1,9 +1,12 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:file_picker/file_picker.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/gestures.dart';
 import 'package:xterm/xterm.dart' hide TerminalKey;
+import 'package:xterm/xterm.dart' as xt show TerminalKey;
 
 import '../bridge/bridge.dart';
 import '../model/app_state.dart';
@@ -12,6 +15,23 @@ import '../theme/tokens.dart';
 import 'chat_screen.dart';
 import 'key_bar.dart';
 import 'widgets.dart';
+
+/// xterm's default keytab has no bare Space record, so shift+space (IME
+/// shifted key events) is swallowed; emit the space before the keytab runs.
+final drovesInputHandler = CascadeInputHandler([
+  _SpaceInputHandler(),
+  defaultInputHandler,
+]);
+
+class _SpaceInputHandler implements TerminalInputHandler {
+  @override
+  String? call(TerminalKeyboardEvent event) {
+    if (event.key == xt.TerminalKey.space && !event.ctrl && !event.alt) {
+      return ' ';
+    }
+    return null;
+  }
+}
 
 /// server renders ANSI; scrollback arrives as a separate `history` payload
 /// that must land in the buffer before frames or the pane looks empty
@@ -49,7 +69,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
   @override
   void initState() {
     super.initState();
-    _terminal = Terminal(maxLines: 20000);
+    _terminal = Terminal(maxLines: 20000, inputHandler: drovesInputHandler);
     _controller = TerminalController();
     _terminal.onOutput = (data) {
       _bridge
@@ -225,12 +245,13 @@ class _TerminalScreenState extends State<TerminalScreen> {
     _bridge
         .scroll(widget.pane.terminalId, 1 << 20, up: false)
         .catchError((_) {});
-    if (!_scroll.hasClients) return;
-    _scroll.animateTo(
-      _scroll.position.maxScrollExtent,
-      duration: const Duration(milliseconds: 180),
-      curve: Curves.easeOut,
-    );
+    if (!kIsWeb && _scroll.hasClients) {
+      _scroll.animateTo(
+        _scroll.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
+      );
+    }
   }
 
   @override
@@ -464,21 +485,35 @@ class _ServerScrollCatcher extends StatefulWidget {
 class _ServerScrollCatcherState extends State<_ServerScrollCatcher> {
   double _carry = 0;
 
+  void _feed(double dy) {
+    _carry += dy;
+    const lineHeight = 15.0;
+    final whole = _carry ~/ lineHeight;
+    if (whole == 0) return;
+    _carry -= whole * lineHeight;
+    // dragging down reveals older lines; negate for the RPC
+    widget.onScroll(-whole);
+  }
+
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.translucent,
-      onVerticalDragUpdate: (details) {
-        _carry += details.delta.dy;
-        const lineHeight = 15.0;
-        final whole = _carry ~/ lineHeight;
-        if (whole == 0) return;
-        _carry -= whole * lineHeight;
-        // dragging down reveals older lines; negate for the RPC
-        widget.onScroll(-whole);
+    return Listener(
+      // Chrome Android turns touch drags into pan-zoom/wheel streams that
+      // xterm's scrollable eats as arrow keys; consume them here first.
+      onPointerSignal: (event) {
+        if (event is PointerScrollEvent) {
+          GestureBinding.instance.pointerSignalResolver.register(event, (e) {
+            _feed((e as PointerScrollEvent).scrollDelta.dy);
+          });
+        }
       },
-      onVerticalDragEnd: (_) => _carry = 0,
-      onVerticalDragCancel: () => _carry = 0,
+      onPointerPanZoomUpdate: (event) => _feed(event.panDelta.dy),
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onVerticalDragUpdate: (details) => _feed(details.delta.dy),
+        onVerticalDragEnd: (_) => _carry = 0,
+        onVerticalDragCancel: () => _carry = 0,
+      ),
     );
   }
 }

@@ -1,0 +1,24 @@
+id: droves-web-android
+name: "Droves 0.1.0 — Web in Android emulator Chrome"
+platform: android
+domain: _default
+environment:
+  kind: local-dev
+device:
+  serial: emulator-5554
+app:
+  package: com.android.chrome
+web:
+  base_url: "https://icqn-arch.tail8022a8.ts.net:13030/droves/"
+  start_url: "https://icqn-arch.tail8022a8.ts.net:13030/droves/"
+safety:
+  read_only: false
+auth:
+  strategy: token-form
+  notes: "Login form takes the bridge token; env DROVES_TOKEN in qa/.env."
+notes: |
+  Same live-bridge safety contract as droves-android: pre-existing workspaces
+  are read-only; mutations only in the qa-scratch workspace. Chrome profile
+  persists the session cookie; never relaunch-clean. Known risk: Flutter web
+  canvas may not render on emulator software WebGL; verify early, document if
+  blocked.

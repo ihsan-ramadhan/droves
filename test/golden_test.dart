@@ -42,6 +42,9 @@ Widget _host(Widget child, {Brightness brightness = Brightness.light}) {
 void main() {
   setUpAll(() async {
     await _loadFonts();
+    // masters are local evidence, not committed; without them every compare
+    // would fail on a fresh clone, so render-only unless explicitly updating
+    autoUpdateGoldenFiles = true;
   });
 
   testWidgets('connect screen renders', (tester) async {

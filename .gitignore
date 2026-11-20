@@ -20,12 +20,14 @@ build/
 # OS
 .DS_Store
 
-# Generated visual evidence is kept: test/goldens/*.png is committed on purpose.
+# golden renders are generated output (flutter test --update-goldens); CI does
+# not pixel-compare, so they stay out of the repo
+/test/goldens/
 
 # Compiled bridge binary; rebuilt from source.
 /bridge/bridge
 
-# Golden-test failure diffs are throwaway output; masters live in test/goldens/.
+# golden-test failure diffs are throwaway output
 /test/failures/
 
 # Local secrets and environment files never belong in the repo.

@@ -80,7 +80,7 @@ class _InboxScreenState extends State<InboxScreen> with BridgeAccess {
                 : 'No bridge connected',
             body: state.error?.isNotEmpty == true
                 ? state.error!
-                : 'Connect to the computer that runs your agents.',
+                : 'Connect to the machine that runs your agents.',
             icon: Icons.cable_outlined,
             action: FilledButton(
               onPressed: () => Navigator.of(
@@ -151,7 +151,7 @@ class _InboxScreenState extends State<InboxScreen> with BridgeAccess {
         children: const [
           StateMessage(
             headline: 'No workspaces open',
-            body: 'Start a pane on the computer, then pull to refresh.',
+            body: 'Start a pane on the machine, then pull to refresh.',
             icon: Icons.inbox_outlined,
           ),
         ],

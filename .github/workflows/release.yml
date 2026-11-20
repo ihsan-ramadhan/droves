@@ -32,11 +32,22 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get
-      - run: flutter build apk --release --split-per-abi
+      # the tag is the source of truth: without this the APK keeps reporting the
+      # pubspec version and the in-app update prompt never clears
+      - run: >-
+          flutter build apk --release --split-per-abi
+          --build-name="${GITHUB_REF_NAME#v}" --build-number="$GITHUB_RUN_NUMBER"
+      - name: Rename APKs
+        run: |
+          cd build/app/outputs/flutter-apk
+          # stable names so install scripts and update.json never chase a tag
+          mv app-arm64-v8a-release.apk droves-arm64.apk
+          mv app-armeabi-v7a-release.apk droves-arm.apk
+          mv app-x86_64-release.apk droves-x86_64.apk
       - uses: actions/upload-artifact@v7
         with:
           name: droves-android-${{ github.ref_name }}
-          path: build/app/outputs/flutter-apk/*.apk
+          path: build/app/outputs/flutter-apk/droves-*.apk
           if-no-files-found: error
           retention-days: 30
 
@@ -52,11 +63,14 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get
-      - run: flutter build web --release --base-href /droves/
+      - run: >-
+          flutter build web --release --base-href /droves/
+          --build-name="${GITHUB_REF_NAME#v}" --build-number="$GITHUB_RUN_NUMBER"
+      - run: tar -C build/web -czf droves-web.tar.gz .
       - uses: actions/upload-artifact@v7
         with:
           name: droves-web-${{ github.ref_name }}
-          path: build/web
+          path: droves-web.tar.gz
           if-no-files-found: error
           retention-days: 30
 
@@ -92,7 +106,8 @@ jobs:
         run: |
           ext=""
           if [ "$GOOS" = "windows" ]; then ext=".exe"; fi
-          go build -trimpath -ldflags='-s -w' \
+          go build -trimpath \
+            -ldflags="-s -w -X main.bridgeVersion=${GITHUB_REF_NAME#v}" \
             -o "../build/droves-bridge-${GOOS}-${GOARCH}${ext}" .
       - uses: actions/upload-artifact@v7
         with:
@@ -102,7 +117,7 @@ jobs:
           retention-days: 30
 
   ios:
-    name: iOS (unsigned)
+    name: iOS (unsigned IPA)
     runs-on: macos-latest
     timeout-minutes: 35
     steps:
@@ -113,10 +128,115 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get
-      - run: flutter build ios --release --no-codesign
+      - run: >-
+          flutter build ios --release --no-codesign
+          --build-name="${GITHUB_REF_NAME#v}" --build-number="$GITHUB_RUN_NUMBER"
+      - name: Package unsigned IPA
+        run: |
+          # SideStore signs the bundle with the user's own certificate, so the
+          # artifact ships unsigned; signing it here would only fit one device
+          rm -rf Payload droves.ipa
+          mkdir Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/
+          zip -qry droves.ipa Payload
       - uses: actions/upload-artifact@v7
         with:
           name: droves-ios-${{ github.ref_name }}
-          path: build/ios/iphoneos/Runner.app
+          path: droves.ipa
           if-no-files-found: error
           retention-days: 30
+
+  publish:
+    name: Publish release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [android, web, bridge, ios]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Generate update manifest and sideload source
+        working-directory: dist
+        env:
+          VERSION: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          version="${VERSION#v}"
+          notes="$(git -C .. tag -l --format='%(contents)' "$VERSION" | sed '/^$/d')"
+          [ -n "$notes" ] || notes="Droves $version"
+
+          # exactly the keys lib/src/updates.dart reads from <bridge>/droves/update.json
+          jq -n \
+            --arg version "$version" \
+            --arg notes "$notes" \
+            '{version: $version, notes: $notes,
+              android_arm64: "download/droves-arm64.apk",
+              android_arm: "download/droves-arm.apk"}' > update.json
+
+          icon="https://raw.githubusercontent.com/$REPO/main/assets/logo/droves-logo.png"
+          jq -n \
+            --arg version "$version" \
+            --arg notes "$notes" \
+            --arg url "https://github.com/$REPO/releases/download/$VERSION/droves.ipa" \
+            --argjson size "$(stat -c %s droves.ipa)" \
+            --arg date "$(date -u +%Y-%m-%d)" \
+            --arg icon "$icon" \
+            '{
+              name: "Droves",
+              subtitle: "Your running agents, from your phone.",
+              description: "Phone and web client for a herdr bridge you host yourself.",
+              iconURL: $icon,
+              tintColor: "#1B1A17",
+              nsfw: false,
+              featuredApps: ["dev.droves.droves"],
+              apps: [{
+                name: "Droves",
+                bundleIdentifier: "dev.droves.droves",
+                developerName: "ihsan-ramadhan",
+                subtitle: "Your running agents, from your phone.",
+                localizedDescription: "Droves shows the workspaces, panes, agents and files that already exist on the machine running herdr. It needs a bridge reachable over a private network such as Tailscale. This IPA is unsigned: SideStore or AltStore re-signs it with your own certificate.",
+                iconURL: $icon,
+                tintColor: "#1B1A17",
+                category: "developer",
+                versions: [{
+                  version: $version,
+                  buildVersion: "1",
+                  date: $date,
+                  localizedDescription: $notes,
+                  downloadURL: $url,
+                  size: $size,
+                  minOSVersion: "15.0"
+                }]
+              }]
+            }' > source.json
+
+          jq -e . update.json > /dev/null
+          jq -e . source.json > /dev/null
+
+          # the installers are assets too: the curl | sh URL has to be stable
+          cp ../scripts/install.sh install.sh
+          cp ../scripts/install.ps1 install.ps1
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum droves.ipa droves-*.apk droves-web.tar.gz droves-bridge-* > SHA256SUMS.txt
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          notes="$(git tag -l --format='%(contents)' "$GITHUB_REF_NAME" | sed '/^$/d')"
+          [ -n "$notes" ] || notes="Droves ${GITHUB_REF_NAME#v}"
+          # assets keep stable names, so install.sh and update.json point at a
+          # constant URL and the tag alone says which build it is
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Droves ${GITHUB_REF_NAME#v}" \
+            --notes "$notes" \
+            dist/*

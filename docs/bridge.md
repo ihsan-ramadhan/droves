@@ -12,6 +12,8 @@ RPC endpoint. The client implements this contract in
 | Surface | Purpose |
 | --- | --- |
 | `POST /api/login` | `{"password":"…"}`; `200` plus a session cookie |
+| `GET /api/health` | `{"ok":true,"service":"droves-bridge","version":"…"}`; no auth |
+| `GET /droves/update.json` | in-app update manifest, served `no-cache` |
 | `GET /ws` | JSON RPC over WebSocket, authenticated by that cookie |
 | `/droves/` | Static web build, same origin as the API |
 | `POST /api/terminal-upload?filename=…` | Stage bytes for terminal paste; returns `{"path":"…"}` |

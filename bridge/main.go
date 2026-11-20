@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -16,7 +17,8 @@ import (
 	"time"
 )
 
-const bridgeVersion = "0.1.0"
+// overridden at build time with -ldflags "-X main.bridgeVersion=..."
+var bridgeVersion = "0.1.0"
 
 type Config struct {
 	Addr         string
@@ -52,7 +54,12 @@ func main() {
 	flag.StringVar(&cfg.Socket, "herdr", envOr("DROVES_HERDR_SOCKET", filepath.Join(home, ".config/herdr/herdr.sock")), "herdr control socket")
 	flag.StringVar(&cfg.ClientSocket, "herdr-client", envOr("DROVES_HERDR_CLIENT_SOCKET", defaultClientSocket(home)), "herdr client surface socket")
 	flag.StringVar(&cfg.StateDir, "state", envOr("DROVES_STATE_DIR", filepath.Join(home, ".local/state/droves-bridge")), "state directory")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println(bridgeVersion)
+		return
+	}
 	cfg.WebDir = expandHome(cfg.WebDir)
 	cfg.TokenFile = expandHome(cfg.TokenFile)
 	cfg.Socket = expandHome(cfg.Socket)
@@ -243,9 +250,12 @@ func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if strings.HasSuffix(rel, "index.html") || strings.HasSuffix(rel, "flutter_service_worker.js") {
+	// the web shell and the update manifest must never be served stale: a cached
+	// bootstrap keeps pointing at the previous build and the update prompt lies
+	switch filepath.Base(rel) {
+	case "index.html", "flutter_bootstrap.js", "flutter_service_worker.js", "version.json", "update.json":
 		w.Header().Set("Cache-Control", "no-cache")
-	} else {
+	default:
 		w.Header().Set("Cache-Control", "public, max-age=3600")
 	}
 	http.ServeContent(w, r, full, st.ModTime(), f)

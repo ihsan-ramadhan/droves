@@ -101,7 +101,7 @@ class _AgentsScreenState extends State<AgentsScreen> with BridgeAccess {
     if (_agents.isEmpty) {
       return const StateMessage(
         headline: 'No agents running',
-        body: 'Start an agent in a pane on the computer.',
+        body: 'Start an agent in a pane on the machine.',
         icon: Icons.smart_toy_outlined,
       );
     }
@@ -454,11 +454,17 @@ class SettingsScreen extends StatelessWidget {
           if (state.update != null)
             ListTile(
               title: Text(
-                kIsWeb ? 'Reload to update' : 'Install ${state.update!.latest}',
+                kIsWeb
+                    ? 'Reload to update'
+                    : Theme.of(context).platform == TargetPlatform.iOS
+                    ? 'Update in SideStore'
+                    : 'Install ${state.update!.latest}',
                 style: monoStyle(context, size: 12, color: c.accent),
               ),
               subtitle: Text(
-                state.update!.notes.isEmpty
+                Theme.of(context).platform == TargetPlatform.iOS && !kIsWeb
+                    ? 'Open SideStore → My Apps and tap update on Droves.'
+                    : state.update!.notes.isEmpty
                     ? 'A newer Droves build is ready.'
                     : state.update!.notes,
                 style: monoStyle(context, size: 11, color: c.muted),
@@ -468,7 +474,7 @@ class SettingsScreen extends StatelessWidget {
                 size: 16,
                 color: c.accent,
               ),
-              onTap: () => _applyUpdate(state.update!),
+              onTap: () => _applyUpdate(context, state.update!),
             ),
           _Section('About'),
           ListTile(
@@ -496,9 +502,22 @@ class SettingsScreen extends StatelessWidget {
   }
 }
 
-Future<void> _applyUpdate(UpdateInfo info) async {
+Future<void> _applyUpdate(BuildContext context, UpdateInfo info) async {
   if (kIsWeb) {
     platform.reloadPage();
+    return;
+  }
+  if (Theme.of(context).platform == TargetPlatform.iOS) {
+    // the release asset is an APK; iOS updates go through whatever signed the app
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Open SideStore → My Apps, then tap update on Droves. Pull to refresh '
+          'the source if ${info.latest} is not listed yet.',
+          style: monoStyle(context, size: 12),
+        ),
+      ),
+    );
     return;
   }
   final url = info.downloadUrl;

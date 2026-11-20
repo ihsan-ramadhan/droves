@@ -420,7 +420,7 @@ class _ChangesGateState extends State<_ChangesGate> {
             title: 'Changes',
             child: StateMessage(
               headline: 'No workspaces',
-              body: 'Open a workspace on the computer first.',
+              body: 'Open a workspace on the machine first.',
               icon: Icons.inbox_outlined,
             ),
           );

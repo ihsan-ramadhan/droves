@@ -1,6 +1,0 @@
-{
-  "version": "0.1.0",
-  "notes": "Pre-release build. Session persistence, mobile header, and notifications.",
-  "android_arm64": "download/droves-0.1.0-arm64.apk",
-  "android_arm": "download/droves-0.1.0-arm.apk"
-}

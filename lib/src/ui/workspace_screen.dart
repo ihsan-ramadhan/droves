@@ -226,7 +226,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> with BridgeAccess {
     if (_panes.isEmpty) {
       return const StateMessage(
         headline: 'No panes in this workspace',
-        body: 'Create a tab or pane on the computer, then refresh.',
+        body: 'Create a tab or pane on the machine, then refresh.',
         icon: Icons.terminal,
       );
     }
