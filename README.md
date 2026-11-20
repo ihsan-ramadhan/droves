@@ -74,10 +74,15 @@ a private network such as Tailscale.
 
 Then get the client:
 
-- **Android**: download `droves-arm64.apk` from the same release, or open the
-  bridge URL and fetch the APK from its own `download/` directory.
-- **iOS**: sideload the unsigned IPA with SideStore, see
-  [iOS without the App Store](#ios-without-the-app-store).
+- **Android**: download
+  [`droves-arm64.apk`](https://github.com/ihsan-ramadhan/droves/releases/latest/download/droves-arm64.apk)
+  (or
+  [`droves-arm.apk`](https://github.com/ihsan-ramadhan/droves/releases/latest/download/droves-arm.apk)
+  for older 32-bit phones) and open it to install. All builds live on the
+  [releases page](https://github.com/ihsan-ramadhan/droves/releases/latest).
+- **iOS**: sideload
+  [`droves.ipa`](https://github.com/ihsan-ramadhan/droves/releases/latest/download/droves.ipa)
+  with SideStore, see [iOS without the App Store](#ios-without-the-app-store).
 - **Web**: nothing to install; log in at `https://<bridge-host>/droves/`.
 
 Open Droves, enter the bridge URL and access token. For a tailnet bridge the URL
@@ -187,7 +192,11 @@ needs AltServer running on a computer on the same network at every refresh.
 1. In SideStore, open the **Sources** tab, tap `+`, and add:
    `https://github.com/ihsan-ramadhan/droves/releases/latest/download/source.json`
 2. Open the Droves page in that source and install it. SideStore downloads the
-   unsigned IPA and re-signs it with your certificate.
+   unsigned
+   [`droves.ipa`](https://github.com/ihsan-ramadhan/droves/releases/latest/download/droves.ipa)
+   and re-signs it with your certificate. You can also grab the IPA from the
+   [releases page](https://github.com/ihsan-ramadhan/droves/releases/latest)
+   and open it in SideStore directly.
 3. Launch Droves and enter your bridge URL and token exactly as on Android.
 
 ### Update Droves

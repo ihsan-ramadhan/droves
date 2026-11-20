@@ -96,6 +96,24 @@ fi
 
 log "bridge:    $BIN_DIR/droves-bridge ($("$BIN_DIR/droves-bridge" -version))"
 
+# a running service keeps the old binary mapped; restart it onto the new one
+if command -v systemctl >/dev/null 2>&1 &&
+  systemctl --user cat droves-bridge.service >/dev/null 2>&1; then
+  if systemctl --user restart droves-bridge.service; then
+    log "service:   droves-bridge.service restarted"
+  else
+    log "warning: could not restart droves-bridge.service; run: systemctl --user restart droves-bridge"
+  fi
+elif [ "$os" = Darwin ] && command -v launchctl >/dev/null 2>&1 &&
+  launchctl list 2>/dev/null | grep -q droves-bridge; then
+  label=$(launchctl list | awk '/droves-bridge/ {print $3; exit}')
+  if launchctl kickstart -k "gui/$(id -u)/$label" 2>/dev/null; then
+    log "service:   $label restarted"
+  else
+    log "warning: could not restart $label; restart it manually"
+  fi
+fi
+
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
   *) log "note: $BIN_DIR is not on PATH" ;;

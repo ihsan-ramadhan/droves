@@ -44,7 +44,18 @@ try {
   }
 
   New-Item -ItemType Directory -Force -Path $binDir | Out-Null
-  Copy-Item "$tmp\droves-bridge-windows-amd64.exe" (Join-Path $binDir 'droves-bridge.exe') -Force
+  $dest = Join-Path $binDir 'droves-bridge.exe'
+  # a running bridge locks its exe and would keep serving the old build
+  $running = Get-Process -Name 'droves-bridge' -ErrorAction SilentlyContinue |
+    Where-Object { $_.Path -eq $dest }
+  $oldCmdline = $null
+  if ($running) {
+    # capture before killing: the process object outlives its WMI entry
+    $oldCmdline = (Get-CimInstance Win32_Process -Filter "ProcessId=$($running[0].Id)" -ErrorAction SilentlyContinue).CommandLine
+    $running | Stop-Process -Force
+    Start-Sleep -Milliseconds 500
+  }
+  Copy-Item "$tmp\droves-bridge-windows-amd64.exe" $dest -Force
 
   if (-not $skipWeb) {
     $webDir = Join-Path $shareDir 'web'
@@ -76,6 +87,17 @@ try {
   $bridge = Join-Path $binDir 'droves-bridge.exe'
   $installed = & $bridge -version
   Write-Host "bridge:    $bridge ($installed)"
+
+  if ($running) {
+    # relaunch detached with the arguments the old process had
+    $bridgeArgs = if ($oldCmdline -and $oldCmdline -match '^"[^"]*"\s+(.*)$') { $Matches[1] } else { '' }
+    if ($bridgeArgs) {
+      Start-Process -FilePath $dest -ArgumentList $bridgeArgs -WindowStyle Hidden
+    } else {
+      Start-Process -FilePath $dest -WindowStyle Hidden
+    }
+    Write-Host 'service:   running bridge restarted onto the new build'
+  }
 
   $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
   if ($userPath -notlike "*$binDir*") {
