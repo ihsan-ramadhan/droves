@@ -32,11 +32,48 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get
+      - name: Restore signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          # publishing a debug-signed APK would lock every user out of in-place
+          # updates, so refuse to build rather than fall back silently
+          for var in KEYSTORE_BASE64 STORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            if [ -z "${!var}" ]; then
+              echo "::error::missing secret for $var; see README (Release signing)"
+              exit 1
+            fi
+          done
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > android/app/droves-upload.jks
+          chmod 600 android/app/droves-upload.jks
+          {
+            echo "storeFile=droves-upload.jks"
+            echo "storePassword=$STORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > android/key.properties
+          chmod 600 android/key.properties
+          keytool -list -keystore android/app/droves-upload.jks \
+            -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS" > /dev/null
       # the tag is the source of truth: without this the APK keeps reporting the
       # pubspec version and the in-app update prompt never clears
       - run: >-
           flutter build apk --release --split-per-abi
           --build-name="${GITHUB_REF_NAME#v}" --build-number="$GITHUB_RUN_NUMBER"
+      - name: Verify the APK is not debug-signed
+        run: |
+          set -euo pipefail
+          apk=build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+          signer="$("$ANDROID_HOME"/build-tools/*/apksigner verify --print-certs "$apk" |
+            grep -m1 'certificate DN:')"
+          echo "$signer"
+          case "$signer" in
+            *"CN=Android Debug"*) echo "::error::APK is debug-signed"; exit 1 ;;
+          esac
       - name: Rename APKs
         run: |
           cd build/app/outputs/flutter-apk

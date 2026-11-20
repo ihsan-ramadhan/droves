@@ -492,7 +492,11 @@ class SettingsScreen extends StatelessWidget {
               'Apache-2.0, bundled fonts and package licenses',
               style: monoStyle(context, size: 11, color: c.muted),
             ),
-            trailing: Icon(Icons.description_outlined, size: 16, color: c.muted),
+            trailing: Icon(
+              Icons.description_outlined,
+              size: 16,
+              color: c.muted,
+            ),
             onTap: () => showLicensePage(
               context: context,
               applicationName: 'Droves',

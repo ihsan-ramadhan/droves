@@ -18,7 +18,7 @@ import (
 )
 
 // overridden at build time with -ldflags "-X main.bridgeVersion=..."
-var bridgeVersion = "0.1.0"
+var bridgeVersion = "0.1.1"
 
 type Config struct {
 	Addr         string

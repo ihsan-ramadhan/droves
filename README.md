@@ -146,6 +146,13 @@ compile-time secret baked into the app.
 Android requires the Android SDK; `compileSdk` is 37 because of the notification
 plugin. iOS builds are unsigned unless you provide signing credentials.
 
+### Release signing
+
+Published APKs need a stable upload key, not a debug key. The workflow reads it
+from repository secrets and refuses to build without them. Keystore setup,
+versioning rules and the generated manifests are documented in
+[docs/release.md](docs/release.md).
+
 Every tagged release publishes an unsigned `droves.ipa` plus a SideStore/AltStore
 source at `releases/latest/download/source.json`. The source is regenerated per
 tag, so a sideloaded install has a working update path without the App Store.
@@ -317,4 +324,4 @@ Droves talks to herdr over its control socket and bundles none of its code.
 
 ## Docs
 
-[Bridge contract](docs/bridge.md) · [Design direction](DESIGN.md) · [CI](.github/workflows/ci.yml)
+[Bridge contract](docs/bridge.md) · [Design direction](DESIGN.md) · [Release](docs/release.md) · [CI](.github/workflows/ci.yml)

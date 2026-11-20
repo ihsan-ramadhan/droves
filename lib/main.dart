@@ -22,10 +22,9 @@ void main() {
   // OFL requires the notice to travel with the fonts, including inside the
   // installed app; the license page is where a user can actually read it
   LicenseRegistry.addLicense(() async* {
-    yield LicenseEntryWithLineBreaks(
-      const ['Droves bundled fonts'],
-      await rootBundle.loadString('assets/fonts/OFL.txt'),
-    );
+    yield LicenseEntryWithLineBreaks(const [
+      'Droves bundled fonts',
+    ], await rootBundle.loadString('assets/fonts/OFL.txt'));
   });
   runApp(const DrovesApp());
 }

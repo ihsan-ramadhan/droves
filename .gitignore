@@ -34,3 +34,8 @@ build/
 .env
 .env.*
 *.pem
+
+# Upload keystore for release signing; CI restores it from secrets.
+*.jks
+*.keystore
+/android/key.properties
