@@ -37,12 +37,15 @@ Future<String> currentAppVersion() async {
   return info.version;
 }
 
-/// the manifest lives beside the web app, served by the same bridge as the client
+const String githubReleaseBase =
+    'https://github.com/ihsan-ramadhan/droves/releases/latest/download';
+
+/// Web reads its manifest from the bridge origin so the session cookie and the
+/// served bundle stay together. Native builds read the release manifest
+/// directly: a bridge can be offline or stale, but the release is canonical.
 Uri? updateManifestUri(String baseUrl) {
   if (kIsWeb) return Uri.base.resolve('update.json');
-  final base = Uri.tryParse(baseUrl);
-  if (base == null || base.host.isEmpty) return null;
-  return Uri.parse('${base.origin}/droves/update.json');
+  return Uri.parse('$githubReleaseBase/update.json');
 }
 
 /// null when unreadable or no release; a failed check must never interrupt the app
@@ -60,12 +63,22 @@ Future<UpdateInfo?> checkForUpdate({
   if (latest == null || latest.isEmpty) return null;
 
   final apk = (body['android_arm64'] ?? body['android_arm']) as String?;
+  final String? downloadUrl;
+  if (apk == null || apk.isEmpty) {
+    downloadUrl = null;
+  } else if (kIsWeb) {
+    downloadUrl = uri.resolve(apk).toString();
+  } else {
+    // the release manifest uses "download/<asset>" relative to the release root
+    final releaseRoot = Uri.parse(
+      'https://github.com/ihsan-ramadhan/droves/releases/latest/',
+    );
+    downloadUrl = releaseRoot.resolve(apk).toString();
+  }
   return UpdateInfo(
     current: current,
     latest: latest,
     notes: (body['notes'] as String?)?.trim() ?? '',
-    downloadUrl: apk == null || apk.isEmpty
-        ? null
-        : uri.resolve(apk).toString(),
+    downloadUrl: downloadUrl,
   );
 }

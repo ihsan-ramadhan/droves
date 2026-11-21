@@ -109,7 +109,7 @@ try {
   Write-Host "Next steps"
   Write-Host "  1. install herdr: https://github.com/herdrdev/herdr"
   Write-Host "  2. start the bridge:"
-  Write-Host "       droves-bridge -addr 0.0.0.0:13030 -web `"$shareDir\web`""
+  Write-Host "       droves-bridge -addr 127.0.0.1:13030 -web `"$shareDir\web`""
   Write-Host "  3. read the access token:"
   Write-Host "       type `"`$env:USERPROFILE\.config\droves-bridge\token`""
   Write-Host "  4. expose the port on your tailnet only:"

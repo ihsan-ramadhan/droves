@@ -29,6 +29,26 @@ from the tag by the publish job, so a release never ships a manifest pointing at
 the previous version. Both installers use the `releases/latest/download/<asset>`
 URL and verify `SHA256SUMS.txt` before installing.
 
+## Bridge CLI
+
+The bridge binary has a small command surface: `droves-bridge run` (the default)
+starts the server, `version` prints the build version, `help` lists flags,
+`restart` restarts a managed service, and `autostart -enable|-disable` manages
+login and boot start. Linux uses a systemd user unit, macOS a LaunchAgent, and
+Windows an ONLOGON scheduled task. Each bridge start or restart checks GitHub
+in the background and auto-installs a newer release, deduplicated by version.
+
+`update` replaces the running binary from GitHub Releases, verifies
+`SHA256SUMS.txt`, and restarts the managed service automatically when one is
+active. `update -check` reports whether a newer release exists; `update -apply`
+installs a binary staged because the running executable was locked. Updates
+cover Linux, macOS and Windows. `DROVES_NO_UPDATE_CHECK=1` disables the
+per-start auto update.
+
+`update` changes only the binary. Release installers remain the supported way to
+refresh web assets and APKs, and both installers still call `-version`, which is
+kept as a compatibility alias for `version`.
+
 ## Android signing
 
 Published APKs must be signed with a stable upload key. A debug key is generated

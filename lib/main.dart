@@ -302,6 +302,15 @@ class _ShellState extends State<Shell> {
       unawaited(platform.reloadPage());
       return;
     }
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      unawaited(
+        launchUrl(
+          Uri.parse('https://github.com/ihsan-ramadhan/droves/releases/latest'),
+          mode: LaunchMode.externalApplication,
+        ),
+      );
+      return;
+    }
     final url = info.downloadUrl;
     if (url == null) return;
     launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);

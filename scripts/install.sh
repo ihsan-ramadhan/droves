@@ -124,7 +124,7 @@ cat >&2 <<EOF
 Next steps
   1. install herdr: https://github.com/herdrdev/herdr
   2. start the bridge:
-       droves-bridge -addr 0.0.0.0:13030 -web $SHARE_DIR/web
+       droves-bridge -addr 127.0.0.1:13030 -web $SHARE_DIR/web
   3. read the access token:
        cat ~/.config/droves-bridge/token
   4. expose the port on your tailnet only:

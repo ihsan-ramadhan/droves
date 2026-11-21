@@ -46,16 +46,97 @@ type Server struct {
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lmsgprefix)
 	log.SetPrefix("droves-bridge: ")
+	dispatch(os.Args[1:])
+}
+
+func flagSet(name string) *flag.FlagSet {
+	fs := flag.NewFlagSet("droves-bridge "+name, flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	return fs
+}
+
+func flagExit(err error) int {
+	if err == flag.ErrHelp {
+		return 0
+	}
+	return 2
+}
+
+func usage() {
+	fmt.Fprintf(os.Stderr, `droves-bridge - bridge for herdr agent workspaces
+
+Usage:
+  droves-bridge [flags]            run the bridge (default)
+  droves-bridge stop               stop the managed bridge
+  droves-bridge restart            restart the managed bridge
+  droves-bridge autostart [flags]  manage login/boot start
+  droves-bridge update [flags]     update and restart from GitHub Releases
+  droves-bridge version            print the version and exit
+  droves-bridge help               show this help
+
+Run flags:
+  -addr, -token-file, -web, -herdr, -herdr-client, -state, -version
+
+Update flags:
+  -check   only report whether a newer release exists
+  -apply   apply a binary staged by an earlier update
+  -base    release download URL (default: %s)
+
+Autostart flags:
+  -enable   install the service/agent/task and start it
+  -disable  remove it
+
+Environment:
+  DROVES_BRIDGE_ADDR, DROVES_TOKEN_FILE, DROVES_WEB_DIR,
+  DROVES_HERDR_SOCKET, DROVES_HERDR_CLIENT_SOCKET, DROVES_STATE_DIR,
+  DROVES_RELEASES_URL, DROVES_NO_UPDATE_CHECK=1
+`, defaultReleasesURL)
+}
+
+func dispatch(args []string) {
+	if len(args) == 0 {
+		runServer()
+		return
+	}
+	switch args[0] {
+	case "run":
+		runServer(args[1:]...)
+	case "stop":
+		os.Exit(runStop())
+	case "restart":
+		os.Exit(runRestart())
+	case "autostart":
+		os.Exit(runAutostart(args[1:]))
+	case "update":
+		os.Exit(runUpdate(args[1:]))
+	case "version", "-version":
+		fmt.Println(bridgeVersion)
+	case "help", "-h", "--help":
+		usage()
+	default:
+		fmt.Fprintf(os.Stderr, "unknown command %q\n\n", args[0])
+		usage()
+		os.Exit(2)
+	}
+}
+
+func runServer(args ...string) {
 	cfg := Config{}
 	home, _ := os.UserHomeDir()
-	flag.StringVar(&cfg.Addr, "addr", envOr("DROVES_BRIDGE_ADDR", "127.0.0.1:13030"), "HTTP listen address")
-	flag.StringVar(&cfg.TokenFile, "token-file", envOr("DROVES_TOKEN_FILE", filepath.Join(home, ".config/droves-bridge/token")), "token file")
-	flag.StringVar(&cfg.WebDir, "web", envOr("DROVES_WEB_DIR", "../build/web"), "Flutter web build")
-	flag.StringVar(&cfg.Socket, "herdr", envOr("DROVES_HERDR_SOCKET", filepath.Join(home, ".config/herdr/herdr.sock")), "herdr control socket")
-	flag.StringVar(&cfg.ClientSocket, "herdr-client", envOr("DROVES_HERDR_CLIENT_SOCKET", defaultClientSocket(home)), "herdr client surface socket")
-	flag.StringVar(&cfg.StateDir, "state", envOr("DROVES_STATE_DIR", filepath.Join(home, ".local/state/droves-bridge")), "state directory")
-	showVersion := flag.Bool("version", false, "print version and exit")
-	flag.Parse()
+	fs := flagSet("run")
+	fs.StringVar(&cfg.Addr, "addr", envOr("DROVES_BRIDGE_ADDR", "127.0.0.1:13030"), "HTTP listen address")
+	fs.StringVar(&cfg.TokenFile, "token-file", envOr("DROVES_TOKEN_FILE", filepath.Join(home, ".config/droves-bridge/token")), "token file")
+	fs.StringVar(&cfg.WebDir, "web", envOr("DROVES_WEB_DIR", "../build/web"), "Flutter web build")
+	fs.StringVar(&cfg.Socket, "herdr", envOr("DROVES_HERDR_SOCKET", filepath.Join(home, ".config/herdr/herdr.sock")), "herdr control socket")
+	fs.StringVar(&cfg.ClientSocket, "herdr-client", envOr("DROVES_HERDR_CLIENT_SOCKET", defaultClientSocket(home)), "herdr client surface socket")
+	fs.StringVar(&cfg.StateDir, "state", envOr("DROVES_STATE_DIR", filepath.Join(home, ".local/state/droves-bridge")), "state directory")
+	showVersion := fs.Bool("version", false, "print version and exit")
+	if err := fs.Parse(args); err != nil {
+		if flagExit(err) != 0 {
+			os.Exit(2)
+		}
+		return
+	}
 	if *showVersion {
 		fmt.Println(bridgeVersion)
 		return
@@ -81,6 +162,7 @@ func main() {
 		clients:  make(map[*Client]struct{}),
 		version:  bridgeVersion,
 	}
+	go maybeAutoUpdate(cfg)
 	srv.shell = NewShellEndpoint(cfg.ClientSocket, srv.herdr)
 	srv.terms = NewTerminalManager(srv)
 	srv.transcripts = NewTranscripts()
