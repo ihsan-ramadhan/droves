@@ -397,7 +397,7 @@ class SettingsScreen extends StatelessWidget {
                   right: Space.md,
                 ),
                 title: Text(item.$1, style: monoStyle(context, size: 12)),
-                value: item.$2,
+                value: state.notificationsEnabled && item.$2,
                 activeTrackColor: c.ink,
                 onChanged: state.notificationsEnabled
                     ? (v) => item.$3(v)

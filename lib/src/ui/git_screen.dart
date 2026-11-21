@@ -38,6 +38,10 @@ class DiffEntry {
   );
 }
 
+/// hidden when any path segment starts with a dot, matching the Files browser
+bool _hasHiddenSegment(String path) =>
+    path.split('/').any((segment) => segment.startsWith('.'));
+
 /// read-only changes for one workspace; commits stay on the machine
 class GitScreen extends StatefulWidget {
   const GitScreen({super.key, required this.workspace, required this.label});
@@ -60,6 +64,7 @@ class _GitScreenState extends State<GitScreen>
   String _messageDraft = '';
   String get _draftKey => 'droves.commit_draft.${widget.workspace}';
   String? _error;
+  bool _showHidden = false;
 
   @override
   void initState() {
@@ -68,7 +73,11 @@ class _GitScreenState extends State<GitScreen>
     _selected.clear();
     SharedPreferences.getInstance().then((prefs) {
       if (!mounted) return;
-      setState(() => _messageDraft = prefs.getString(_draftKey) ?? '');
+      setState(() {
+        _messageDraft = prefs.getString(_draftKey) ?? '';
+        // same toggle as the Files browser; hidden paths stay out of the diff list
+        _showHidden = prefs.getBool('droves.files.show_hidden') ?? false;
+      });
     });
   }
 
@@ -80,6 +89,14 @@ class _GitScreenState extends State<GitScreen>
     } else {
       await prefs.setString(_draftKey, text);
     }
+  }
+
+  Future<void> _toggleHidden() async {
+    final next = !_showHidden;
+    setState(() => _showHidden = next);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('droves.files.show_hidden', next);
+    await _load();
   }
 
   @override
@@ -110,6 +127,7 @@ class _GitScreenState extends State<GitScreen>
       final entries = ((r['entries'] as List?) ?? const [])
           .cast<Map<String, dynamic>>()
           .map(DiffEntry.fromJson)
+          .where((e) => _showHidden || !_hasHiddenSegment(e.path))
           .toList();
       if (!mounted) return;
       setState(() {
@@ -306,6 +324,18 @@ class _GitScreenState extends State<GitScreen>
             style: IconButton.styleFrom(splashFactory: NoSplash.splashFactory),
             onPressed: _commit,
           ),
+        IconButton(
+          icon: Icon(
+            _showHidden
+                ? Icons.visibility_outlined
+                : Icons.visibility_off_outlined,
+            size: 20,
+          ),
+          color: c.ink,
+          tooltip: _showHidden ? 'Hide hidden files' : 'Show hidden files',
+          style: IconButton.styleFrom(splashFactory: NoSplash.splashFactory),
+          onPressed: _toggleHidden,
+        ),
         PopupMenuButton<String>(
           icon: const Icon(Icons.more_vert, size: 20),
           color: c.paper,

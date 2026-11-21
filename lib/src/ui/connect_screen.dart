@@ -32,9 +32,13 @@ class _ConnectScreenState extends State<ConnectScreen> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (_url.text.isNotEmpty) return;
-    final saved = AppScope.of(context).baseUrl;
+    final state = AppScope.of(context);
+    final saved = state.baseUrl;
     // a browser is pinned to the origin that served this page
     _url.text = kIsWeb ? Uri.base.origin : saved;
+    // the token is already stored for the saved endpoint; prefill so a web
+    // reconnect does not ask for it again
+    if (kIsWeb && _token.text.isEmpty) _token.text = state.token;
   }
 
   @override

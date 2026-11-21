@@ -125,7 +125,9 @@ void main() {
     addTearDown(tester.view.reset);
 
     await tester.pumpWidget(
-      _host(SettingsScreen(themeMode: ThemeMode.system, onThemeChanged: (_) {})),
+      _host(
+        SettingsScreen(themeMode: ThemeMode.system, onThemeChanged: (_) {}),
+      ),
     );
     await tester.pumpAndSettle();
     await expectLater(
