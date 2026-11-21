@@ -61,7 +61,7 @@ class ChatScreen extends StatefulWidget {
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> {
+class _ChatScreenState extends State<ChatScreen> with BridgeAccess {
   final _scroll = ScrollController();
   final _input = TextEditingController();
   final _inputFocus = FocusNode();
@@ -98,7 +98,6 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _agentActive = false;
   String _agentStatus = 'unknown';
 
-  Bridge get _bridge => AppScope.of(context).bridge!;
 
   @override
   void initState() {
@@ -131,14 +130,19 @@ class _ChatScreenState extends State<ChatScreen> {
       });
       _input.selection = TextSelection.collapsed(offset: _input.text.length);
     });
-    _load();
+    _scroll.addListener(_onScroll);
+  }
+
+  @override
+  void onBridgeReady() {
+    _poll?.cancel();
+    unawaited(_load());
     unawaited(_refreshAgentStatus());
     // no transcript subscription on the bridge; poll cheaply
     _poll = Timer.periodic(const Duration(seconds: 3), (_) {
-      _load(silent: true);
+      unawaited(_load(silent: true));
       unawaited(_refreshAgentStatus());
     });
-    _scroll.addListener(_onScroll);
   }
 
   /// rebuild only on pinned-threshold crossings, not every scroll pixel
@@ -199,7 +203,7 @@ class _ChatScreenState extends State<ChatScreen> {
     if (!silent) setState(() => _loading = true);
     try {
       // history_version: 2 is what returns tool calls and results
-      final r = await _bridge.call('agent_history.get', {
+      final r = await bridge.call('agent_history.get', {
         'pane_id': widget.pane.paneId,
         'terminal_id': widget.pane.terminalId,
         'history_version': 2,
@@ -253,7 +257,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _refreshAgentStatus() async {
     try {
-      final panes = await _bridge.panes(widget.pane.workspaceId);
+      final panes = await bridge.panes(widget.pane.workspaceId);
       final live = panes.firstWhere(
         (p) => p.paneId == widget.pane.paneId,
         orElse: () => widget.pane,
@@ -311,7 +315,7 @@ class _ChatScreenState extends State<ChatScreen> {
     if (!mounted) return;
     setState(() => _uploading = true);
     try {
-      final staged = await _bridge.upload(file.name, bytes);
+      final staged = await bridge.upload(file.name, bytes);
       setState(() => _staged.add(staged));
       _persistDraft();
     } catch (e) {
@@ -340,7 +344,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _interrupt() async {
     try {
-      await _bridge.sendText(widget.pane.paneId, '\x1b');
+      await bridge.sendText(widget.pane.paneId, '\x1b');
     } catch (e) {
       _toast('Could not interrupt: $e');
     }
@@ -354,7 +358,7 @@ class _ChatScreenState extends State<ChatScreen> {
     if (text.isEmpty || _sending) return;
     setState(() => _sending = true);
     try {
-      await _bridge.sendPrompt(widget.pane.paneId, text);
+      await bridge.sendPrompt(widget.pane.paneId, text);
       _input.clear();
       _staged.clear();
       await _DraftStore.clear(_draftKey);
@@ -559,7 +563,7 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _loadReasoning() async {
     setState(() => _reasoningBusy = true);
     try {
-      final steps = await _bridge.sessionReasoning(
+      final steps = await bridge.sessionReasoning(
         widget.pane.paneId,
         widget.pane.workspaceId,
         widget.pane.tabId,

@@ -1,8 +1,15 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart'
-    show LicenseEntryWithLineBreaks, LicenseRegistry, kIsWeb;
+    show
+        LicenseEntryWithLineBreaks,
+        LicenseRegistry,
+        defaultTargetPlatform,
+        kIsWeb,
+        TargetPlatform;
 import 'package:flutter/services.dart' show rootBundle;
+// ignore: deprecated_member_use
+import 'package:flutter/material.dart' as sdk_material;
 import 'package:material_ui/material_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -42,6 +49,12 @@ bool shouldNotify(
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  if (defaultTargetPlatform == TargetPlatform.android) {
+    TextMagnifier.adaptiveMagnifierConfiguration =
+        TextMagnifierConfiguration.disabled;
+    sdk_material.TextMagnifier.adaptiveMagnifierConfiguration =
+        sdk_material.TextMagnifierConfiguration.disabled;
+  }
   // OFL requires the notice to travel with the fonts, including inside the
   // installed app; the license page is where a user can actually read it
   LicenseRegistry.addLicense(() async* {
@@ -107,6 +120,9 @@ class _DrovesAppState extends State<DrovesApp> {
       child: MaterialApp(
         title: 'Droves',
         debugShowCheckedModeBanner: false,
+        localizationsDelegates: const [
+          sdk_material.DefaultMaterialLocalizations.delegate,
+        ],
         theme: drovesTheme(Brightness.light),
         darkTheme: drovesTheme(Brightness.dark),
         themeMode: _mode,

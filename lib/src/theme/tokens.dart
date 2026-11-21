@@ -99,6 +99,7 @@ abstract final class Radii {
   static const card = 6.0;
 }
 
+
 extension DrovesTheme on BuildContext {
   DrovesColors get colors => Theme.of(this).extension<DrovesColors>()!;
   bool get isWide => MediaQuery.sizeOf(this).width >= 900;
@@ -117,7 +118,7 @@ ThemeData drovesTheme(Brightness brightness) {
           seedColor: c.accent,
           brightness: brightness,
         ).copyWith(
-          surface: c.paper,
+          surface: c.surface,
           primary: c.accent,
           onSurface: c.ink,
           // Android selection handles and the copy toolbar must not inherit the seed palette's pale tones; keep them readable on paper and terminal
@@ -135,6 +136,15 @@ ThemeData drovesTheme(Brightness brightness) {
     extensions: [c],
     dividerTheme: DividerThemeData(color: c.rule, thickness: 1, space: 1),
     textTheme: base.textTheme.apply(bodyColor: c.ink, displayColor: c.ink),
+    snackBarTheme: SnackBarThemeData(
+      backgroundColor: c.surface,
+      contentTextStyle: TextStyle(
+        fontFamily: 'PlexMono',
+        fontSize: 12,
+        color: c.ink,
+      ),
+      actionTextColor: c.accent,
+    ),
     splashFactory: NoSplash.splashFactory,
   );
 }

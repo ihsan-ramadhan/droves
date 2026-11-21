@@ -45,7 +45,10 @@ class MermaidMarkdownBuilder extends MarkdownElementBuilder {
         border: Border.all(color: c.rule),
         borderRadius: BorderRadius.circular(Radii.row),
       ),
-      child: SelectableText(source, style: monoStyle(context, size: 11.5)),
+      child: SelectableText(
+        source,
+        style: monoStyle(context, size: 11.5),
+      ),
     );
   }
 }
