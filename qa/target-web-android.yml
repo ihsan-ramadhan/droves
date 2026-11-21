@@ -1,5 +1,5 @@
 id: droves-web-android
-name: "Droves 0.1.0 — Web in Android emulator Chrome"
+name: "Droves 0.1.2 — Web in Android emulator Chrome"
 platform: android
 domain: _default
 environment:
