@@ -50,6 +50,11 @@ class TerminalScreen extends StatefulWidget {
 }
 
 class _TerminalScreenState extends State<TerminalScreen> {
+  // agent detection lands after the pane opens; poll agent.list so the chat
+  // button appears without leaving the terminal
+  String? _agent;
+  String _agentStatus = 'unknown';
+  Timer? _agentPoll;
   late final Terminal _terminal;
   late final TerminalController _controller;
   final _scroll = ScrollController();
@@ -74,6 +79,8 @@ class _TerminalScreenState extends State<TerminalScreen> {
   @override
   void initState() {
     super.initState();
+    _agent = widget.pane.agent;
+    _agentStatus = widget.pane.agentStatus;
     _terminal = Terminal(maxLines: 20000, inputHandler: drovesInputHandler);
     _controller = TerminalController();
     _terminal.onOutput = (data) {
@@ -100,7 +107,10 @@ class _TerminalScreenState extends State<TerminalScreen> {
     super.didChangeDependencies();
     if (_bridgeRef != null) return;
     _bridgeRef = AppScope.of(context).bridge;
-    if (_bridgeRef != null) _attach();
+    if (_bridgeRef != null) {
+      _attach();
+      _startAgentPoll();
+    }
   }
 
   Future<void> _restoreKeyBar() async {
@@ -176,6 +186,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
 
   @override
   void dispose() {
+    _agentPoll?.cancel();
     _sub?.cancel();
     if (_attached) {
       _bridgeRef?.detach(widget.pane.terminalId).catchError((_) {});
@@ -183,6 +194,41 @@ class _TerminalScreenState extends State<TerminalScreen> {
     _scroll.dispose();
     _focus.dispose();
     super.dispose();
+  }
+
+  void _startAgentPoll() {
+    _refreshAgent();
+    _agentPoll ??= Timer.periodic(const Duration(seconds: 4), (_) {
+      _refreshAgent();
+    });
+  }
+
+  Future<void> _refreshAgent() async {
+    final live = _bridgeRef;
+    if (live == null || live.state != BridgeState.ready) return;
+    try {
+      final r = await live.call('agent.list', {});
+      final agents = (r['agents'] as List?) ?? const [];
+      String? agent;
+      var status = 'unknown';
+      for (final raw in agents) {
+        final a = (raw as Map).cast<String, dynamic>();
+        if (a['terminal_id'] == widget.pane.terminalId) {
+          agent = a['agent'] as String?;
+          status = (a['agent_status'] as String?) ?? 'unknown';
+          break;
+        }
+      }
+      if (!mounted) return;
+      if (agent != _agent || status != _agentStatus) {
+        setState(() {
+          _agent = agent;
+          _agentStatus = status;
+        });
+      }
+    } catch (_) {
+      // transient bridge errors are fine; the next tick retries
+    }
   }
 
   void _send(TerminalKey key) {
@@ -331,12 +377,12 @@ class _TerminalScreenState extends State<TerminalScreen> {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    final agent = widget.pane.agent;
+    final agent = _agent;
     return DrovesScaffold(
       title: widget.workspaceLabel,
       subtitle: Row(
         children: [
-          StatusWord(widget.pane.agentStatus),
+          StatusWord(_agentStatus),
           const SizedBox(width: Space.sm),
           Flexible(
             child: Text(

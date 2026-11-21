@@ -69,7 +69,7 @@ class NotificationService {
       const AndroidNotificationChannel(
         _channelId,
         _channelName,
-        description: 'Finished agents, agents waiting on you, and Ranger runs.',
+        description: 'Finished agents, agents waiting on you, and Scout runs.',
         importance: Importance.high,
       ),
     );

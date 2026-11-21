@@ -31,8 +31,8 @@ the web build. See [Bridge contract](docs/bridge.md) for the RPC surface.
 | Chat | Transcript with tool calls, search, attachments and prompt sending |
 | Changes | Diffs, stage/unstage, pull, push, commit history and selected-file commits |
 | Files | Browse, read, edit, create, move, delete and content search |
-| Ranger | Bridge-hosted assistant with sessions and model selection |
-| Notifications | Completed, blocked and Ranger activity; tapping one opens the related pane |
+| Scout | Bridge-hosted assistant (omp, pi or any OpenAI-compatible endpoint) with sessions and model selection |
+| Notifications | Completed, blocked and Scout activity; tapping one opens the related pane |
 | Machines | Multiple saved bridges with per-bridge hosts |
 
 ## Quick start
@@ -102,7 +102,7 @@ release.
 | Bridge URL | Connect screen | Scheme required; use the tailnet host |
 | Access token | Connect screen | Exchanged for a session cookie, stored locally |
 | Theme | Settings | Light, dark, follow system |
-| Notifications | Settings | Completed, blocked and Ranger activity; taps open the pane |
+| Notifications | Settings | Completed, blocked and Scout activity; taps open the pane |
 | Battery optimization | Settings (Android only) | Request exemption so agent alerts are not delayed |
 | Autostart | `droves-bridge autostart` | Login/boot start for the bridge |
 | `DROVES_NO_UPDATE_CHECK=1` | Environment | Disable background bridge updates |

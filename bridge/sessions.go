@@ -57,14 +57,30 @@ func (t *Transcripts) sessionPath(ctx context.Context, s *Server, p map[string]a
 	if agent == nil {
 		return "", "", errors.New("this pane has no agent session")
 	}
-	path := agent.AgentSession.Value
+	name := normalizeAgentName(firstNonEmpty(agent.AgentSession.Agent, agent.Agent))
+	ref := agent.AgentSession
+	// kind="path": the hook reported a filesystem path directly
+	if ref.Kind == "path" && ref.Value != "" {
+		if _, err := os.Stat(ref.Value); err == nil {
+			return ref.Value, name, nil
+		}
+	}
+	// kind="id" (or legacy reports): resolve the session id to a file
+	if ref.Value != "" {
+		cwd := firstNonEmpty(agent.ForegroundCwd, agent.Cwd)
+		if path := resolveSessionFile(name, ref.Value, cwd); path != "" {
+			return path, name, nil
+		}
+	}
+	// fallback: treat the value as a path (older herdr without kind)
+	path := ref.Value
 	if path == "" {
-		return "", agent.Agent, errors.New("the agent has no session file yet")
+		return "", name, errors.New("the agent has no session file yet")
 	}
 	if _, err := os.Stat(path); err != nil {
-		return "", agent.Agent, fmt.Errorf("session file is unavailable: %w", err)
+		return "", name, fmt.Errorf("session file is unavailable: %w", err)
 	}
-	return path, agent.Agent, nil
+	return path, name, nil
 }
 
 func (t *Transcripts) load(ctx context.Context, s *Server, p map[string]any) (*transcriptFile, error) {
@@ -149,6 +165,13 @@ func parseTranscript(path, agent string) (*transcriptFile, error) {
 	}
 	defer f.Close()
 	out := &transcriptFile{full: make(map[string]string)}
+	name := normalizeAgentName(agent)
+	if name == "codex" {
+		// codex needs a pre-scan for event_msg/response_item dedup;
+		// handled by a dedicated two-pass parser
+		return parseCodexTranscript(f, out)
+	}
+	parse := recordParserFor(name)
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 256*1024), 32*1024*1024)
 	lineNo := 0
@@ -162,18 +185,7 @@ func parseTranscript(path, agent string) (*transcriptFile, error) {
 		if json.Unmarshal([]byte(line), &rec) != nil {
 			continue
 		}
-		switch agent {
-		case "omp", "":
-			parseOMPRecord(out, rec, lineNo)
-		case "claude", "claude-code":
-			parseClaudeRecord(out, rec, lineNo)
-		default:
-			if _, ok := rec["message"]; ok {
-				parseClaudeRecord(out, rec, lineNo)
-			} else {
-				parseOMPRecord(out, rec, lineNo)
-			}
-		}
+		parse(out, rec, lineNo)
 	}
 	if err := sc.Err(); err != nil {
 		return nil, err
@@ -182,6 +194,30 @@ func parseTranscript(path, agent string) (*transcriptFile, error) {
 		out.entries = out.entries[len(out.entries)-1500:]
 	}
 	return out, nil
+}
+
+// recordParserFor returns the per-record parser for a canonical agent name.
+// Unknown agents fall back to a heuristic: records with a "message" key look
+// like claude, everything else like omp/pi.
+func recordParserFor(name string) func(out *transcriptFile, rec map[string]any, lineNo int) {
+	switch name {
+	case "omp", "pi":
+		return parseOMPRecord
+	case "claude":
+		return parseClaudeRecord
+	case "grok":
+		return parseGrokRecord
+	case "kimi":
+		return parseKimiRecord
+	default:
+		return func(out *transcriptFile, rec map[string]any, lineNo int) {
+			if _, ok := rec["message"]; ok {
+				parseClaudeRecord(out, rec, lineNo)
+			} else {
+				parseOMPRecord(out, rec, lineNo)
+			}
+		}
+	}
 }
 
 func textFromContent(raw any) string {
@@ -375,6 +411,12 @@ func parseOMPRecord(out *transcriptFile, rec map[string]any, lineNo int) {
 }
 
 func parseClaudeRecord(out *transcriptFile, rec map[string]any, lineNo int) {
+	// capture the claude session id for agent_session.get (present on every record)
+	if out.sessionID == "" {
+		if sid, ok := rec["sessionId"].(string); ok && sid != "" {
+			out.sessionID = sid
+		}
+	}
 	typ, _ := rec["type"].(string)
 	if typ != "user" && typ != "assistant" {
 		return

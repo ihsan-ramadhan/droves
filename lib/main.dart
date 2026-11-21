@@ -23,6 +23,7 @@ import 'src/ui/agents_screen.dart';
 import 'src/ui/chat_screen.dart';
 import 'src/ui/git_screen.dart';
 import 'src/ui/inbox_screen.dart';
+import 'src/ui/scout_screen.dart';
 import 'src/ui/widgets.dart';
 import 'src/updates.dart';
 import 'src/bridge/bridge.dart';
@@ -33,13 +34,13 @@ bool shouldNotify(
   required bool hidden,
   required bool completed,
   required bool blocked,
-  required bool ranger,
+  required bool scout,
 }) {
   if (!enabled) return false;
   final wanted = switch (notice.kind) {
     'completed' => completed,
     'blocked' => blocked,
-    'ranger' => ranger,
+    'scout' => scout,
     _ => false,
   };
   // blocked needs an answer, so it always notifies; completed is short-lived
@@ -98,7 +99,7 @@ class _DrovesAppState extends State<DrovesApp> {
     });
   }
 
-  /// completed and blocked always notify; ranger waits until the app is hidden
+  /// completed and blocked always notify; scout waits until the app is hidden
   /// because its run already has a progress surface in the UI
   void _handleNotice(TaskNotice notice) {
     final s = _state;
@@ -109,7 +110,7 @@ class _DrovesAppState extends State<DrovesApp> {
       hidden: hidden,
       completed: s.notifyCompleted,
       blocked: s.notifyBlocked,
-      ranger: s.notifyRanger,
+      scout: s.notifyScout,
     )) {
       unawaited(NotificationService.instance.show(notice));
     }
@@ -364,6 +365,7 @@ class _ShellState extends State<Shell> {
   static const _destinations = [
     (Icons.inbox_outlined, Icons.inbox, 'Inbox'),
     (Icons.smart_toy_outlined, Icons.smart_toy, 'Agents'),
+    (Icons.travel_explore_outlined, Icons.travel_explore, 'Scout'),
     (Icons.account_tree_outlined, Icons.account_tree, 'Changes'),
     (Icons.tune, Icons.tune, 'Settings'),
   ];
@@ -375,7 +377,8 @@ class _ShellState extends State<Shell> {
     final body = switch (_index) {
       0 => const InboxScreen(),
       1 => const AgentsScreen(),
-      2 => const _ChangesGate(),
+      2 => const ScoutScreen(),
+      3 => const _ChangesGate(),
       _ => SettingsScreen(
         themeMode: widget.themeMode,
         onThemeChanged: widget.onThemeChanged,

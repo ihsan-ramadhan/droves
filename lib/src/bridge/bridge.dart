@@ -166,7 +166,7 @@ class Bridge {
   Stream<Map<String, dynamic>> get events => _events.stream;
   Stream<BridgeState> get stateStream => _state.stream;
 
-  /// agent finished/blocked and Ranger task events, relayed while the app is open
+  /// agent finished/blocked and Scout task events, relayed while the app is open
   Stream<TaskNotice> get notices => _notices.stream;
 
   BridgeState _current = BridgeState.idle;
@@ -266,7 +266,7 @@ class Bridge {
       }
       return;
     }
-    // Ranger pushes bare `assistant`/`assistant_notification` keys, no `event` envelope
+    // Scout pushes bare `assistant`/`assistant_notification` keys, no `event` envelope
     if (msg['assistant'] is Map) {
       _events.add({'event': 'assistant', 'data': msg['assistant']});
       return;
@@ -279,7 +279,7 @@ class Bridge {
       if (title != null) {
         _notices.add(
           TaskNotice(
-            kind: 'ranger',
+            kind: 'scout',
             title: title,
             body: (data['body'] as String?) ?? '',
           ),
@@ -699,7 +699,7 @@ class Bridge {
   }
 }
 
-/// one relayed task event: agent finished/blocked or a Ranger run
+/// one relayed task event: agent finished/blocked or a Scout run
 class TaskNotice {
   TaskNotice({
     required this.kind,
@@ -711,7 +711,7 @@ class TaskNotice {
     this.paneId,
   });
 
-  /// `completed`, `blocked` or `ranger`.
+  /// `completed`, `blocked` or `scout`.
   final String kind;
   final String title;
   final String body;

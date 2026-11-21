@@ -37,7 +37,7 @@ type Server struct {
 	sessions    *SessionStore
 	terms       *TerminalManager
 	transcripts *Transcripts
-	ranger      *Ranger
+	scout       *Scout
 	clients     map[*Client]struct{}
 	mu          sync.Mutex
 	version     string
@@ -96,6 +96,11 @@ Environment:
 func dispatch(args []string) {
 	if len(args) == 0 {
 		runServer()
+		return
+	}
+	// bare flags ("-addr", "--web", ...) mean run, matching the documented CLI
+	if strings.HasPrefix(args[0], "-") && args[0] != "-version" {
+		runServer(args...)
 		return
 	}
 	switch args[0] {
@@ -166,7 +171,7 @@ func runServer(args ...string) {
 	srv.shell = NewShellEndpoint(cfg.ClientSocket, srv.herdr)
 	srv.terms = NewTerminalManager(srv)
 	srv.transcripts = NewTranscripts()
-	srv.ranger = NewRanger(srv)
+	srv.scout = NewScout(srv)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/health", srv.handleHealth)

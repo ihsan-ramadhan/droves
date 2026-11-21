@@ -16,7 +16,6 @@ import '../theme/tokens.dart';
 import '../updates.dart';
 import 'chat_screen.dart';
 import 'connections_screen.dart';
-import 'ranger_screen.dart';
 import 'connect_screen.dart';
 import 'key_bar.dart';
 import 'widgets.dart';
@@ -222,17 +221,6 @@ class SettingsScreen extends StatelessWidget {
       subtitle: const LedgerLabel('connection and app preferences'),
       child: ListView(
         children: [
-          ListTile(
-            title: Text('Ranger', style: nameStyle(context, size: 15)),
-            subtitle: Text(
-              'Ask across workspaces with the bridge model',
-              style: monoStyle(context, size: 11, color: c.muted),
-            ),
-            trailing: const Icon(Icons.chevron_right, size: 18),
-            onTap: () => Navigator.of(context)
-                .push(MaterialPageRoute(builder: (_) => const RangerScreen())),
-          ),
-          Divider(color: c.rule, height: 1),
           // a browser can only reach the bridge that served it, so there is no other machine to switch to
           if (!kIsWeb) ...[
             ListTile(
@@ -386,7 +374,7 @@ class SettingsScreen extends StatelessWidget {
           for (final item in [
             ('Finished tasks', state.notifyCompleted, state.setNotifyCompleted),
             ('Needs your input', state.notifyBlocked, state.setNotifyBlocked),
-            ('Ranger runs', state.notifyRanger, state.setNotifyRanger),
+            ('Scout runs', state.notifyScout, state.setNotifyScout),
           ])
             Padding(
               padding: const EdgeInsets.only(left: Space.md),

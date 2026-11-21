@@ -8,60 +8,75 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 )
 
-type Ranger struct {
+type Scout struct {
 	srv      *Server
 	mu       sync.Mutex
-	state    *rangerState
+	state    *scoutState
 	models   []map[string]any
 	modelsAt time.Time
 }
 
-type rangerState struct {
-	Config   rangerConfig     `json:"config"`
-	Active   string           `json:"session_id"`
-	Sessions []*rangerSession `json:"sessions"`
+type scoutState struct {
+	Config   scoutConfig     `json:"config"`
+	Active   string          `json:"session_id"`
+	Sessions []*scoutSession `json:"sessions"`
 }
 
-type rangerConfig struct {
+type scoutConfig struct {
 	Provider          string           `json:"provider"`
 	Model             string           `json:"model"`
 	ThinkingLevel     string           `json:"thinking_level"`
+	CLI               string           `json:"cli"`
+	BaseURL           string           `json:"base_url,omitempty"`
+	APIKey            string           `json:"api_key,omitempty"`
 	AllowedWorkspaces []map[string]any `json:"allowed_workspaces"`
 }
 
-type rangerSession struct {
-	ID       string          `json:"id"`
-	Title    string          `json:"title"`
-	Updated  time.Time       `json:"updated_at"`
-	Messages []rangerMessage `json:"messages"`
-	Running  bool            `json:"-"`
+type scoutSession struct {
+	ID       string         `json:"id"`
+	Title    string         `json:"title"`
+	Updated  time.Time      `json:"updated_at"`
+	Messages []scoutMessage `json:"messages"`
+	CLIState string         `json:"cli_state,omitempty"`
+	Running  bool           `json:"-"`
 }
 
-type rangerMessage struct {
+type scoutMessage struct {
 	Role string `json:"role"`
 	Text string `json:"text"`
 }
 
-func NewRanger(srv *Server) *Ranger {
-	r := &Ranger{srv: srv}
+func NewScout(srv *Server) *Scout {
+	r := &Scout{srv: srv}
+	// one-time move of legacy omp session dirs into the per-CLI layout
+	legacy := filepath.Join(srv.cfg.StateDir, "ranger")
+	scout := filepath.Join(srv.cfg.StateDir, "scout")
+	if _, err := os.Stat(scout); os.IsNotExist(err) {
+		if _, err := os.Stat(legacy); err == nil {
+			_ = os.MkdirAll(scout, 0o700)
+			_ = os.Rename(legacy, filepath.Join(scout, "omp"))
+		}
+	}
 	r.state = r.loadState()
 	return r
 }
 
-func (r *Ranger) statePath() string {
-	return filepath.Join(r.srv.cfg.StateDir, "ranger.json")
+func (r *Scout) statePath() string {
+	return filepath.Join(r.srv.cfg.StateDir, "scout.json")
 }
 
-func (r *Ranger) loadState() *rangerState {
-	state := &rangerState{}
+func (r *Scout) loadState() *scoutState {
+	state := &scoutState{}
 	if data, err := os.ReadFile(r.statePath()); err == nil {
+		_ = json.Unmarshal(data, state)
+	} else if data, err := os.ReadFile(filepath.Join(r.srv.cfg.StateDir, "ranger.json")); err == nil {
+		// legacy state from before the Scout rename
 		_ = json.Unmarshal(data, state)
 	}
 	if state.Active == "" || state.session(state.Active) == nil {
@@ -70,7 +85,7 @@ func (r *Ranger) loadState() *rangerState {
 	return state
 }
 
-func (r *Ranger) saveLocked() {
+func (r *Scout) saveLocked() {
 	data, err := json.MarshalIndent(r.state, "", "  ")
 	if err != nil {
 		return
@@ -81,15 +96,15 @@ func (r *Ranger) saveLocked() {
 	}
 }
 
-func (r *Ranger) ensureSession(state *rangerState) *rangerSession {
+func (r *Scout) ensureSession(state *scoutState) *scoutSession {
 	id, _ := randomToken(12)
-	sess := &rangerSession{ID: id, Title: "New chat", Updated: time.Now().UTC()}
-	state.Sessions = append([]*rangerSession{sess}, state.Sessions...)
+	sess := &scoutSession{ID: id, Title: "New chat", Updated: time.Now().UTC()}
+	state.Sessions = append([]*scoutSession{sess}, state.Sessions...)
 	state.Active = id
 	return sess
 }
 
-func (s *rangerState) session(id string) *rangerSession {
+func (s *scoutState) session(id string) *scoutSession {
 	for _, sess := range s.Sessions {
 		if sess.ID == id {
 			return sess
@@ -98,7 +113,7 @@ func (s *rangerState) session(id string) *rangerSession {
 	return nil
 }
 
-func (r *Ranger) Handle(ctx context.Context, method string, p map[string]any) (any, error) {
+func (r *Scout) Handle(ctx context.Context, method string, p map[string]any) (any, error) {
 	switch method {
 	case "bridge.assistant.get":
 		return r.Get(ctx), nil
@@ -114,7 +129,7 @@ func (r *Ranger) Handle(ctx context.Context, method string, p map[string]any) (a
 	return nil, fmt.Errorf("unknown assistant method: %s", method)
 }
 
-func (r *Ranger) Get(ctx context.Context) map[string]any {
+func (r *Scout) Get(ctx context.Context) map[string]any {
 	r.mu.Lock()
 	if len(r.state.Config.AllowedWorkspaces) == 0 {
 		r.state.Config.AllowedWorkspaces = r.allWorkspaces(ctx)
@@ -147,18 +162,24 @@ func (r *Ranger) Get(ctx context.Context) map[string]any {
 	}
 }
 
-func (r *Ranger) configJSON() map[string]any {
+func (r *Scout) configJSON() map[string]any {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	cli := r.state.Config.CLI
+	if cli == "" {
+		cli = "omp"
+	}
 	return map[string]any{
 		"provider":           r.state.Config.Provider,
 		"model":              r.state.Config.Model,
 		"thinking_level":     r.state.Config.ThinkingLevel,
+		"cli":                cli,
+		"base_url":           r.state.Config.BaseURL,
 		"allowed_workspaces": r.state.Config.AllowedWorkspaces,
 	}
 }
 
-func (r *Ranger) allWorkspaces(ctx context.Context) []map[string]any {
+func (r *Scout) allWorkspaces(ctx context.Context) []map[string]any {
 	snap, err := r.srv.snapshot(ctx)
 	if err != nil {
 		return []map[string]any{}
@@ -172,16 +193,35 @@ func (r *Ranger) allWorkspaces(ctx context.Context) []map[string]any {
 	return out
 }
 
-func (r *Ranger) Configure(p map[string]any) (any, error) {
-	provider := asString(p, "provider")
+func (r *Scout) Configure(p map[string]any) (any, error) {
+	cli := asString(p, "cli")
+	if cli == "" {
+		cli = "omp"
+	}
+	if _, ok := findAssistantCLI(cli); !ok {
+		return nil, fmt.Errorf("unknown assistant CLI %q", cli)
+	}
 	model := asString(p, "model")
-	if provider == "" || model == "" {
-		return nil, errors.New("provider and model are required")
+	if model == "" {
+		return nil, errors.New("model is required")
+	}
+	provider := asString(p, "provider")
+	if provider == "" {
+		provider = "custom"
+	}
+	baseURL := asString(p, "base_url")
+	if cli == "openai" && baseURL == "" {
+		return nil, errors.New("base_url is required for the openai driver")
 	}
 	r.mu.Lock()
 	r.state.Config.Provider = provider
 	r.state.Config.Model = model
 	r.state.Config.ThinkingLevel = asString(p, "thinking_level")
+	r.state.Config.CLI = cli
+	r.state.Config.BaseURL = baseURL
+	if key := asString(p, "api_key"); key != "" {
+		r.state.Config.APIKey = key
+	}
 	if raw, ok := p["allowed_workspaces"].([]any); ok && len(raw) > 0 {
 		refs := make([]map[string]any, 0, len(raw))
 		for _, item := range raw {
@@ -199,7 +239,7 @@ func (r *Ranger) Configure(p map[string]any) (any, error) {
 	return map[string]any{"config": r.configJSON()}, nil
 }
 
-func (r *Ranger) NewSession() (any, error) {
+func (r *Scout) NewSession() (any, error) {
 	r.mu.Lock()
 	sess := r.ensureSession(r.state)
 	r.saveLocked()
@@ -207,7 +247,7 @@ func (r *Ranger) NewSession() (any, error) {
 	return map[string]any{"session_id": sess.ID}, nil
 }
 
-func (r *Ranger) Select(id string) (any, error) {
+func (r *Scout) Select(id string) (any, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.state.session(id) == nil {
@@ -218,7 +258,7 @@ func (r *Ranger) Select(id string) (any, error) {
 	return map[string]any{"session_id": id}, nil
 }
 
-func (r *Ranger) Send(ctx context.Context, p map[string]any) (any, error) {
+func (r *Scout) Send(ctx context.Context, p map[string]any) (any, error) {
 	text := strings.TrimSpace(asString(p, "text"))
 	if text == "" {
 		return nil, errors.New("message is empty")
@@ -241,7 +281,7 @@ func (r *Ranger) Send(ctx context.Context, p map[string]any) (any, error) {
 	}
 	if sess.Running {
 		r.mu.Unlock()
-		return nil, errors.New("Ranger is already running this session")
+		return nil, errors.New("Scout is already running this session")
 	}
 	if raw, ok := p["scope"].([]any); ok && len(raw) > 0 {
 		refs := make([]map[string]any, 0, len(raw))
@@ -260,7 +300,7 @@ func (r *Ranger) Send(ctx context.Context, p map[string]any) (any, error) {
 		cfg.AllowedWorkspaces = r.allWorkspaces(ctx)
 		r.state.Config.AllowedWorkspaces = cfg.AllowedWorkspaces
 	}
-	sess.Messages = append(sess.Messages, rangerMessage{Role: "user", Text: text})
+	sess.Messages = append(sess.Messages, scoutMessage{Role: "user", Text: text})
 	if sess.Title == "New chat" {
 		title := text
 		if len(title) > 60 {
@@ -280,7 +320,7 @@ func (r *Ranger) Send(ctx context.Context, p map[string]any) (any, error) {
 	return map[string]any{"ok": true, "session_id": sessionID}, nil
 }
 
-func (r *Ranger) snapshotLocked() map[string]any {
+func (r *Scout) snapshotLocked() map[string]any {
 	state := r.state
 	sess := state.session(state.Active)
 	messages := make([]map[string]any, 0)
@@ -306,31 +346,49 @@ func (r *Ranger) snapshotLocked() map[string]any {
 	}
 }
 
-func (r *Ranger) configLocked() map[string]any {
+func (r *Scout) configLocked() map[string]any {
+	cli := r.state.Config.CLI
+	if cli == "" {
+		cli = "omp"
+	}
 	return map[string]any{
 		"provider":           r.state.Config.Provider,
 		"model":              r.state.Config.Model,
 		"thinking_level":     r.state.Config.ThinkingLevel,
+		"cli":                cli,
+		"base_url":           r.state.Config.BaseURL,
 		"allowed_workspaces": r.state.Config.AllowedWorkspaces,
 	}
 }
 
-func (r *Ranger) push(snapshot map[string]any) {
+func (r *Scout) push(snapshot map[string]any) {
 	r.srv.notifyAll(map[string]any{"assistant": snapshot})
 }
 
-func (r *Ranger) run(sessionID, text string, cfg rangerConfig) {
+func (r *Scout) run(sessionID, text string, cfg scoutConfig) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
-	answer, err := r.invoke(ctx, sessionID, text, cfg)
 	r.mu.Lock()
 	sess := r.state.session(sessionID)
+	var history []scoutMessage
+	cliState := ""
+	if sess != nil {
+		history = append([]scoutMessage(nil), sess.Messages...)
+		cliState = sess.CLIState
+	}
+	r.mu.Unlock()
+	answer, newState, err := r.invoke(ctx, sessionID, text, cfg, history, cliState)
+	r.mu.Lock()
+	sess = r.state.session(sessionID)
 	if sess != nil {
 		sess.Running = false
+		if newState != "" {
+			sess.CLIState = newState
+		}
 		if err != nil {
-			sess.Messages = append(sess.Messages, rangerMessage{Role: "assistant", Text: "Ranger failed: " + err.Error()})
+			sess.Messages = append(sess.Messages, scoutMessage{Role: "assistant", Text: "Scout failed: " + err.Error()})
 		} else if answer != "" {
-			sess.Messages = append(sess.Messages, rangerMessage{Role: "assistant", Text: answer})
+			sess.Messages = append(sess.Messages, scoutMessage{Role: "assistant", Text: answer})
 		}
 		sess.Updated = time.Now().UTC()
 	}
@@ -343,23 +401,27 @@ func (r *Ranger) run(sessionID, text string, cfg rangerConfig) {
 	}
 	if err != nil {
 		r.srv.notifyAll(map[string]any{"assistant_notification": map[string]any{
-			"title": "Ranger failed", "body": err.Error(),
+			"title": "Scout failed", "body": err.Error(),
 		}})
 	} else {
 		r.srv.notifyAll(map[string]any{"assistant_notification": map[string]any{
-			"title": "Ranger finished", "body": truncate(answer, 140),
+			"title": "Scout finished", "body": truncate(answer, 140),
 		}})
 	}
 }
 
-func (r *Ranger) invoke(ctx context.Context, sessionID, text string, cfg rangerConfig) (string, error) {
-	omp, err := exec.LookPath(envOr("OMP_BIN", "omp"))
-	if err != nil {
-		return "", errors.New("omp is not installed on the bridge host")
+func (r *Scout) invoke(ctx context.Context, sessionID, text string, cfg scoutConfig, history []scoutMessage, cliState string) (string, string, error) {
+	cliName := cfg.CLI
+	if cliName == "" {
+		cliName = "omp"
+	}
+	cli, ok := findAssistantCLI(cliName)
+	if !ok {
+		return "", "", fmt.Errorf("unknown assistant CLI %q", cliName)
 	}
 	snap, err := r.srv.snapshot(ctx)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	var roots []string
 	for _, ref := range cfg.AllowedWorkspaces {
@@ -371,49 +433,29 @@ func (r *Ranger) invoke(ctx context.Context, sessionID, text string, cfg rangerC
 		}
 	}
 	cwd := r.srv.cfg.StateDir
-	args := []string{"-p", "--mode=json", "--no-title", "--auto-approve", "--max-time=12m",
-		"--model", cfg.Provider + "/" + cfg.Model}
-	if cfg.ThinkingLevel != "" {
-		args = append(args, "--thinking", cfg.ThinkingLevel)
-	}
+	var extra []string
 	if len(roots) > 0 {
 		cwd = roots[0]
-		for _, root := range roots[1:] {
-			args = append(args, "--add-dir", root)
-		}
+		extra = roots[1:]
 	}
-	sessionDir := filepath.Join(r.srv.cfg.StateDir, "ranger", sessionID)
-	if err := os.MkdirAll(sessionDir, 0o700); err != nil {
-		return "", err
+	sessionDir := sessionDirFor(r.srv.cfg.StateDir, cliName, sessionID)
+	iv := assistantInvoke{
+		ctx:        ctx,
+		cli:        cli,
+		sessionDir: sessionDir,
+		hasSession: hasSessionFile(sessionDir),
+		state:      cliState,
+		text:       text,
+		modelRef:   cfg.Provider + "/" + cfg.Model,
+		modelID:    cfg.Model,
+		thinking:   cfg.ThinkingLevel,
+		cwd:        cwd,
+		extraDirs:  extra,
+		endpoint:   cfg.BaseURL,
+		apiKey:     cfg.APIKey,
+		history:    history,
 	}
-	args = append(args, "--session-dir", sessionDir)
-	if hasSessionFile(sessionDir) {
-		args = append(args, "--continue")
-	}
-	args = append(args, text)
-	cmd := exec.CommandContext(ctx, omp, args...)
-	cmd.Dir = cwd
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err = cmd.Run()
-	if ctx.Err() != nil {
-		return "", errors.New("Ranger timed out")
-	}
-	answer := parseRangerOutput(stdout.Bytes())
-	if err != nil {
-		msg := strings.TrimSpace(stderr.String())
-		if msg == "" {
-			msg = strings.TrimSpace(stdout.String())
-		}
-		if answer == "" && msg != "" {
-			return "", errors.New(truncate(msg, 2000))
-		}
-		if answer == "" {
-			return "", err
-		}
-	}
-	return answer, nil
+	return runAssistant(iv)
 }
 
 func hasSessionFile(dir string) bool {
@@ -429,7 +471,7 @@ func hasSessionFile(dir string) bool {
 	return false
 }
 
-func parseRangerOutput(data []byte) string {
+func parseScoutOutput(data []byte) string {
 	var answer string
 	sc := bufio.NewScanner(bytes.NewReader(data))
 	sc.Buffer(make([]byte, 64*1024), 16*1024*1024)
@@ -471,7 +513,7 @@ func parseRangerOutput(data []byte) string {
 	return answer
 }
 
-func (r *Ranger) Models(ctx context.Context) []map[string]any {
+func (r *Scout) Models(ctx context.Context) []map[string]any {
 	r.mu.Lock()
 	if len(r.models) > 0 && time.Since(r.modelsAt) < 10*time.Minute {
 		out := r.models
@@ -479,46 +521,7 @@ func (r *Ranger) Models(ctx context.Context) []map[string]any {
 		return out
 	}
 	r.mu.Unlock()
-	omp, err := exec.LookPath(envOr("OMP_BIN", "omp"))
-	if err != nil {
-		return []map[string]any{}
-	}
-	cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	out, err := exec.CommandContext(cctx, omp, "models", "--json").Output()
-	if err != nil {
-		return []map[string]any{}
-	}
-	var catalog struct {
-		Models []struct {
-			Provider string   `json:"provider"`
-			Kind     string   `json:"kind"`
-			ID       string   `json:"id"`
-			Name     string   `json:"name"`
-			Thinking []string `json:"thinking"`
-		} `json:"models"`
-	}
-	if json.Unmarshal(out, &catalog) != nil {
-		return []map[string]any{}
-	}
-	models := make([]map[string]any, 0, len(catalog.Models))
-	for _, m := range catalog.Models {
-		if m.Kind != "" && m.Kind != "chat" {
-			continue
-		}
-		label := m.Name
-		if label == "" {
-			label = m.ID
-		}
-		thinking := m.Thinking
-		if thinking == nil {
-			thinking = []string{}
-		}
-		models = append(models, map[string]any{
-			"provider": m.Provider, "id": m.ID, "label": label,
-			"thinking_levels": thinking,
-		})
-	}
+	models := assistantModels(ctx)
 	r.mu.Lock()
 	r.models = models
 	r.modelsAt = time.Now()

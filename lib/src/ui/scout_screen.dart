@@ -5,20 +5,23 @@ import 'package:material_ui/material_ui.dart';
 import '../theme/tokens.dart';
 import 'widgets.dart';
 
-class RangerModel {
-  RangerModel({
+class ScoutModel {
+  ScoutModel({
+    required this.cli,
     required this.provider,
     required this.id,
     required this.label,
     required this.thinkingLevels,
   });
 
+  final String cli;
   final String provider;
   final String id;
   final String label;
   final List<String> thinkingLevels;
 
-  factory RangerModel.fromJson(Map<String, dynamic> j) => RangerModel(
+  factory ScoutModel.fromJson(Map<String, dynamic> j) => ScoutModel(
+    cli: (j['cli'] as String?) ?? 'omp',
     provider: (j['provider'] as String?) ?? '',
     id: (j['id'] as String?) ?? '',
     label: (j['label'] as String?) ?? (j['id'] as String? ?? ''),
@@ -27,26 +30,26 @@ class RangerModel {
   );
 }
 
-class RangerMessage {
-  RangerMessage({required this.role, required this.text});
+class ScoutMessage {
+  ScoutMessage({required this.role, required this.text});
 
   final String role;
   final String text;
 }
 
 /// the bridge's own assistant across workspaces; model comes from bridge config, not a CLI flag
-class RangerScreen extends StatefulWidget {
-  const RangerScreen({super.key});
+class ScoutScreen extends StatefulWidget {
+  const ScoutScreen({super.key});
 
   @override
-  State<RangerScreen> createState() => _RangerScreenState();
+  State<ScoutScreen> createState() => _ScoutScreenState();
 }
 
-class _RangerScreenState extends State<RangerScreen> with BridgeAccess {
+class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
   final _input = TextEditingController();
   final _scroll = ScrollController();
-  List<RangerMessage> _messages = const [];
-  List<RangerModel> _models = const [];
+  List<ScoutMessage> _messages = const [];
+  List<ScoutModel> _models = const [];
   List<Map<String, dynamic>> _sessions = const [];
   Map<String, dynamic> _config = const {};
   String? _sessionId;
@@ -79,7 +82,7 @@ class _RangerScreenState extends State<RangerScreen> with BridgeAccess {
           .cast<Map<String, dynamic>>();
       _messages = raw
           .map(
-            (m) => RangerMessage(
+            (m) => ScoutMessage(
               role: (m['role'] as String?) ?? 'assistant',
               text: (m['text'] as String?) ?? '',
             ),
@@ -97,7 +100,7 @@ class _RangerScreenState extends State<RangerScreen> with BridgeAccess {
       setState(() {
         _models = ((r['models'] as List?) ?? const [])
             .cast<Map<String, dynamic>>()
-            .map(RangerModel.fromJson)
+            .map(ScoutModel.fromJson)
             .toList();
       });
       _apply(r);
@@ -120,7 +123,7 @@ class _RangerScreenState extends State<RangerScreen> with BridgeAccess {
 
   Future<void> _pickModel() async {
     final c = context.colors;
-    final selected = await showModalBottomSheet<RangerModel>(
+    final selected = await showModalBottomSheet<ScoutModel>(
       context: context,
       backgroundColor: c.paper,
       isScrollControlled: true,
@@ -139,9 +142,9 @@ class _RangerScreenState extends State<RangerScreen> with BridgeAccess {
                     .where(
                       (m) =>
                           q.isEmpty ||
-                          '${m.provider} ${m.label}'.toLowerCase().contains(
-                            q.toLowerCase(),
-                          ),
+                          '${m.cli} ${m.provider} ${m.label}'
+                              .toLowerCase()
+                              .contains(q.toLowerCase()),
                     )
                     .toList();
                 return Column(
@@ -170,6 +173,28 @@ class _RangerScreenState extends State<RangerScreen> with BridgeAccess {
                         ),
                       ),
                     ),
+                    ListTile(
+                      dense: true,
+                      leading: Icon(Icons.link, size: 18, color: c.muted),
+                      title: Text(
+                        'Custom endpoint',
+                        style: monoStyle(context, size: 12.5),
+                      ),
+                      subtitle: Text(
+                        'Any OpenAI-compatible base URL',
+                        style: monoStyle(context, size: 10, color: c.muted),
+                      ),
+                      onTap: () => Navigator.of(sheet).pop(
+                        ScoutModel(
+                          cli: 'openai',
+                          provider: 'custom',
+                          id: '',
+                          label: 'Custom endpoint',
+                          thinkingLevels: const [],
+                        ),
+                      ),
+                    ),
+                    Divider(color: c.rule, height: 1),
                     Expanded(
                       child: filtered.isEmpty
                           ? StateMessage(
@@ -191,7 +216,7 @@ class _RangerScreenState extends State<RangerScreen> with BridgeAccess {
                                     style: monoStyle(context, size: 12.5),
                                   ),
                                   subtitle: Text(
-                                    m.provider,
+                                    '${m.cli} · ${m.provider}',
                                     style: monoStyle(
                                       context,
                                       size: 10,
@@ -212,13 +237,108 @@ class _RangerScreenState extends State<RangerScreen> with BridgeAccess {
       },
     );
     if (selected == null) return;
+    if (selected.cli == 'openai' && selected.id.isEmpty) {
+      await _customEndpoint();
+      return;
+    }
     try {
       await bridge.call('bridge.assistant.configure_chat', {
+        'cli': selected.cli,
         'provider': selected.provider,
         'model': selected.id,
         'thinking_level': selected.thinkingLevels.isEmpty
             ? null
             : selected.thinkingLevels.first,
+      });
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.toString(), style: monoStyle(context, size: 12)),
+        ),
+      );
+    }
+  }
+
+  /// any OpenAI-compatible endpoint; the API key is optional for local servers
+  Future<void> _customEndpoint() async {
+    final c = context.colors;
+    final baseUrl = TextEditingController();
+    final apiKey = TextEditingController();
+    final model = TextEditingController();
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        backgroundColor: c.paper,
+        title: Text('Custom endpoint', style: nameStyle(context, size: 16)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: baseUrl,
+              style: monoStyle(context, size: 12),
+              decoration: InputDecoration(
+                labelText: 'Base URL',
+                hintText: 'https://openrouter.ai/api/v1',
+                hintStyle: monoStyle(context, size: 11, color: c.muted),
+              ),
+            ),
+            const SizedBox(height: Space.sm),
+            TextField(
+              controller: apiKey,
+              style: monoStyle(context, size: 12),
+              obscureText: true,
+              decoration: InputDecoration(
+                labelText: 'API key (optional)',
+                hintStyle: monoStyle(context, size: 11, color: c.muted),
+              ),
+            ),
+            const SizedBox(height: Space.sm),
+            TextField(
+              controller: model,
+              style: monoStyle(context, size: 12),
+              decoration: InputDecoration(
+                labelText: 'Model',
+                hintText: 'gpt-4o-mini',
+                hintStyle: monoStyle(context, size: 11, color: c.muted),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialog).pop(false),
+            child: Text('Cancel', style: monoStyle(context, size: 12)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialog).pop(true),
+            child: Text('Save', style: monoStyle(context, size: 12)),
+          ),
+        ],
+      ),
+    );
+    if (saved != true || !mounted) return;
+    final url = baseUrl.text.trim();
+    final id = model.text.trim();
+    if (url.isEmpty || id.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Base URL and model are required',
+            style: monoStyle(context, size: 12),
+          ),
+        ),
+      );
+      return;
+    }
+    try {
+      await bridge.call('bridge.assistant.configure_chat', {
+        'cli': 'openai',
+        'provider': 'custom',
+        'model': id,
+        'base_url': url,
+        'api_key': apiKey.text.trim(),
       });
       await _load();
     } catch (e) {
@@ -285,9 +405,11 @@ class _RangerScreenState extends State<RangerScreen> with BridgeAccess {
     final model = (_config['model'] as String?) ?? '';
     final provider = (_config['provider'] as String?) ?? '';
     return DrovesScaffold(
-      title: 'Ranger',
+      title: 'Scout',
       subtitle: LedgerLabel(
-        model.isEmpty ? 'no model selected' : '$provider / $model',
+        model.isEmpty
+            ? 'no model selected'
+            : '${_config['cli'] ?? 'omp'} $provider/$model',
       ),
       leading: IconButton(
         icon: const Icon(Icons.arrow_back, size: 20),
@@ -371,7 +493,7 @@ class _RangerScreenState extends State<RangerScreen> with BridgeAccess {
     }
     if (_error != null) {
       return StateMessage(
-        headline: 'Ranger is not answering',
+        headline: 'Scout is not answering',
         body: _error!,
         icon: Icons.error_outline,
         action: OutlinedButton(
@@ -384,7 +506,7 @@ class _RangerScreenState extends State<RangerScreen> with BridgeAccess {
       return StateMessage(
         headline: 'Ask about your workspaces',
         body:
-            'Ranger reads history, diffs, and terminal output through the '
+            'Scout reads history, diffs, and terminal output through the '
             'bridge. Pick a model first.',
         icon: Icons.auto_awesome_outlined,
         action: OutlinedButton(
@@ -405,7 +527,7 @@ class _RangerScreenState extends State<RangerScreen> with BridgeAccess {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             LedgerLabel(
-              user ? 'you' : 'ranger',
+              user ? 'you' : 'scout',
               color: user ? c.muted : c.accent,
             ),
             const SizedBox(height: Space.xs),
@@ -453,7 +575,7 @@ class _RangerScreenState extends State<RangerScreen> with BridgeAccess {
                 maxLines: 5,
                 style: monoStyle(context, size: 13),
                 decoration: InputDecoration(
-                  hintText: 'Ask Ranger',
+                  hintText: 'Ask Scout',
                   hintStyle: monoStyle(
                     context,
                     size: 12,

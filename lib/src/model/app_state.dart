@@ -41,6 +41,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   static const _kNotify = 'droves.notify_enabled';
   static const _kNotifyCompleted = 'droves.notify_completed';
   static const _kNotifyBlocked = 'droves.notify_blocked';
+  static const _kNotifyScout = 'droves.notify_scout';
+  // legacy key from when the assistant was called Ranger
   static const _kNotifyRanger = 'droves.notify_ranger';
   static const _kAutoReconnect = 'droves.auto_reconnect';
   static const _kThemeMode = 'droves.theme_mode';
@@ -57,7 +59,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   bool notificationsEnabled = true;
   bool notifyCompleted = true;
   bool notifyBlocked = true;
-  bool notifyRanger = false;
+  bool notifyScout = false;
   bool autoReconnect = true;
 
   /// persisted so a restart keeps the theme
@@ -142,7 +144,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     notificationsEnabled = prefs.getBool(_kNotify) ?? true;
     notifyCompleted = prefs.getBool(_kNotifyCompleted) ?? true;
     notifyBlocked = prefs.getBool(_kNotifyBlocked) ?? true;
-    notifyRanger = prefs.getBool(_kNotifyRanger) ?? false;
+    notifyScout =
+        prefs.getBool(_kNotifyScout) ?? prefs.getBool(_kNotifyRanger) ?? false;
     autoReconnect = prefs.getBool(_kAutoReconnect) ?? true;
     themeMode = switch (prefs.getString(_kThemeMode)) {
       'light' => ThemeMode.light,
@@ -214,11 +217,11 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     await prefs.setBool(_kNotifyBlocked, value);
   }
 
-  Future<void> setNotifyRanger(bool value) async {
-    notifyRanger = value;
+  Future<void> setNotifyScout(bool value) async {
+    notifyScout = value;
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_kNotifyRanger, value);
+    await prefs.setBool(_kNotifyScout, value);
   }
 
   Future<void> setThemeMode(ThemeMode mode) async {

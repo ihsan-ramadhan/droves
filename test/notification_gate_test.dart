@@ -16,7 +16,7 @@ void main() {
           hidden: false,
           completed: true,
           blocked: true,
-          ranger: true,
+          scout: true,
         ),
         isTrue,
       );
@@ -30,7 +30,7 @@ void main() {
           hidden: true,
           completed: true,
           blocked: true,
-          ranger: true,
+          scout: true,
         ),
         isTrue,
       );
@@ -44,7 +44,7 @@ void main() {
           hidden: false,
           completed: true,
           blocked: true,
-          ranger: true,
+          scout: true,
         ),
         isTrue,
       );
@@ -53,23 +53,23 @@ void main() {
     test('disabled and per-kind toggles are respected', () {
       expect(
         shouldNotify(
-          notice('ranger'),
+          notice('scout'),
           enabled: false,
           hidden: true,
           completed: true,
           blocked: true,
-          ranger: true,
+          scout: true,
         ),
         isFalse,
       );
       expect(
         shouldNotify(
-          notice('ranger'),
+          notice('scout'),
           enabled: true,
           hidden: true,
           completed: true,
           blocked: true,
-          ranger: false,
+          scout: false,
         ),
         isFalse,
       );

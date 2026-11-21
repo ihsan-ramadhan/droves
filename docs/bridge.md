@@ -66,11 +66,11 @@ Other pushes use an event envelope:
 {"event":"task_notification","data":{"kind":"completed","title":"…","body":"…"}}
 ```
 
-Task events carry `kind` (`completed`, `blocked`, `ranger`), `title`, `body`,
+Task events carry `kind` (`completed`, `blocked`, `scout`), `title`, `body`,
 and optionally `agent`, `workspace_id`, `tab_id`, `pane_id`. The bridge emits
 `completed` and `blocked` when a herdr pane leaves `working`; the first status
 snapshot only seeds state. Clients use the optional `workspace_id`, `tab_id` and
-`pane_id` to deep-link a notification tap to the matching pane. Ranger also
+`pane_id` to deep-link a notification tap to the matching pane. Scout also
 pushes `{"assistant": {…}}` and `{"assistant_notification": {…}}` snapshots.
 
 ## Methods
@@ -167,12 +167,18 @@ Writes go through `POST /api/file/upload`. Paths are workspace-relative unless
 | `bridge.ping` | — | `ok`, `version` |
 | `bridge.status` | — | `state`, `version`, `clients`, `herdr_socket` |
 
-### Ranger
+### Scout
+
+Scout drives a headless coding agent on the bridge host. The driver is chosen
+per configuration with `cli`: `omp` and `pi` shell out to the installed CLI in
+print mode; `openai` talks to any OpenAI-compatible `base_url` directly and
+keeps the transcript in `scout.json` (no CLI session). `api_key` is accepted on
+`configure_chat` but never returned by `assistant.get`.
 
 | Method | Parameters |
 | --- | --- |
 | `bridge.assistant.get` | — |
-| `bridge.assistant.configure_chat` | `provider`, `model`, `thinking_level` |
+| `bridge.assistant.configure_chat` | `cli`, `provider`, `model`, `thinking_level`, `base_url`, `api_key`, `allowed_workspaces` |
 | `bridge.assistant.send` | `text`, `scope`, `request_id`, `session_id?` |
 | `bridge.assistant.new_session` | — |
 | `bridge.assistant.select_session` | `session_id` |

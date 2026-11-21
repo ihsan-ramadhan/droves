@@ -324,7 +324,7 @@ func (s *Server) dispatch(ctx context.Context, c *Client, req RPCRequest) (any, 
 
 	default:
 		if strings.HasPrefix(req.Method, "bridge.assistant.") {
-			return s.ranger.Handle(ctx, req.Method, p)
+			return s.scout.Handle(ctx, req.Method, p)
 		}
 		return nil, fmt.Errorf("unknown bridge method: %s", req.Method)
 	}
