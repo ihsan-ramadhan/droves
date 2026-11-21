@@ -98,7 +98,6 @@ class _ChatScreenState extends State<ChatScreen> with BridgeAccess {
   bool _agentActive = false;
   String _agentStatus = 'unknown';
 
-
   @override
   void initState() {
     super.initState();

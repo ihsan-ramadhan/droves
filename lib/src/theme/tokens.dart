@@ -99,7 +99,6 @@ abstract final class Radii {
   static const card = 6.0;
 }
 
-
 extension DrovesTheme on BuildContext {
   DrovesColors get colors => Theme.of(this).extension<DrovesColors>()!;
   bool get isWide => MediaQuery.sizeOf(this).width >= 900;
