@@ -20,6 +20,7 @@ import 'src/platform_web_stub.dart'
     as platform;
 import 'src/theme/tokens.dart';
 import 'src/ui/agents_screen.dart';
+import 'src/ui/chat_screen.dart';
 import 'src/ui/git_screen.dart';
 import 'src/ui/inbox_screen.dart';
 import 'src/ui/widgets.dart';
@@ -79,12 +80,19 @@ class _DrovesAppState extends State<DrovesApp> {
   @override
   void initState() {
     super.initState();
-    NotificationService.instance.init();
+    unawaited(
+      NotificationService.instance.init(
+        onNoticeTap: (notice) {
+          if (notice != null) _state.tappedNotice = notice;
+        },
+      ),
+    );
     _state.onNotice = _handleNotice;
     _state.loadVersion();
     _state.loadSaved().then((_) {
       if (mounted) setState(() => _mode = _state.themeMode);
       _state.checkForUpdates();
+      unawaited(_handleLaunchNotification());
       if (_state.endpoints.isEmpty) return;
       _state.useEndpoint(_state.activeIndex).catchError((_) {});
     });
@@ -105,6 +113,11 @@ class _DrovesAppState extends State<DrovesApp> {
     )) {
       unawaited(NotificationService.instance.show(notice));
     }
+  }
+
+  Future<void> _handleLaunchNotification() async {
+    final notice = await NotificationService.instance.launchNotice();
+    if (notice != null) _state.tappedNotice = notice;
   }
 
   @override
@@ -194,7 +207,12 @@ class _ShellState extends State<Shell> {
   }
 
   void _onStateChanged() {
-    _maybePromptNotifications();
+    final s = _state;
+    final tapped = s?.tappedNotice;
+    if (tapped != null && s!.bridge?.state == BridgeState.ready) {
+      s.tappedNotice = null;
+      unawaited(_openNoticePane(tapped));
+    }
     final update = _state?.update;
     if (update == null || update.latest == _notifiedUpdate) return;
     _notifiedUpdate = update.latest;
@@ -214,6 +232,33 @@ class _ShellState extends State<Shell> {
         ),
       );
     });
+  }
+
+  Future<void> _openNoticePane(TaskNotice notice) async {
+    final bridge = _state?.bridge;
+    if (bridge == null || bridge.state != BridgeState.ready) return;
+    final workspaceId = notice.workspaceId;
+    if (workspaceId == null || workspaceId.isEmpty) return;
+    try {
+      final panes = await bridge.panes(workspaceId);
+      PaneInfo? pane;
+      if (notice.paneId != null && notice.paneId!.isNotEmpty) {
+        for (final p in panes) {
+          if (p.paneId == notice.paneId) {
+            pane = p;
+            break;
+          }
+        }
+      }
+      final target = pane ?? panes.firstOrNull;
+      if (target == null || !mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) =>
+              ChatScreen(pane: target, label: notice.agent ?? notice.title),
+        ),
+      );
+    } catch (_) {}
   }
 
   /// browser permission requires a tap; denied or unsupported turns the toggle off

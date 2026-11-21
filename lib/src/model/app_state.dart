@@ -79,6 +79,14 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   /// set by `main` so the bridge relays task events without importing the notification plugin
   void Function(TaskNotice notice)? onNotice;
 
+  /// notification tap request consumed by the shell to open the target pane
+  TaskNotice? _tappedNotice;
+  TaskNotice? get tappedNotice => _tappedNotice;
+  set tappedNotice(TaskNotice? value) {
+    _tappedNotice = value;
+    notifyListeners();
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     foreground = state == AppLifecycleState.resumed;

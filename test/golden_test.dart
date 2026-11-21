@@ -25,6 +25,18 @@ Future<void> _loadFonts() async {
       );
     await loader.load();
   }
+  // icon glyphs live in the SDK cache, not the app bundle
+  final root = Platform.environment['FLUTTER_ROOT'];
+  final icons = root == null
+      ? null
+      : File(
+          '$root/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+        );
+  if (icons != null && icons.existsSync()) {
+    final loader = FontLoader('MaterialIcons')
+      ..addFont(Future.value(ByteData.sublistView(icons.readAsBytesSync())));
+    await loader.load();
+  }
 }
 
 Widget _host(Widget child, {Brightness brightness = Brightness.light}) {
@@ -42,6 +54,12 @@ Widget _host(Widget child, {Brightness brightness = Brightness.light}) {
 void main() {
   setUpAll(() async {
     await _loadFonts();
+    // settings reads key-bar prefs, absent in the test process
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          const MethodChannel('plugins.flutter.io/shared_preferences'),
+          (_) async => <String, Object>{},
+        );
     // masters are local evidence, not committed; without them every compare
     // would fail on a fresh clone, so render-only unless explicitly updating
     autoUpdateGoldenFiles = true;
@@ -98,6 +116,39 @@ void main() {
     await expectLater(
       find.byType(AgentsScreen),
       matchesGoldenFile('goldens/agents-empty.png'),
+    );
+  });
+
+  testWidgets('settings renders', (tester) async {
+    tester.view.physicalSize = const Size(1080, 2340);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(
+      _host(SettingsScreen(themeMode: ThemeMode.system, onThemeChanged: (_) {})),
+    );
+    await tester.pumpAndSettle();
+    await expectLater(
+      find.byType(SettingsScreen),
+      matchesGoldenFile('goldens/settings.png'),
+    );
+  });
+
+  testWidgets('settings renders in dark mode', (tester) async {
+    tester.view.physicalSize = const Size(1080, 2340);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(
+      _host(
+        SettingsScreen(themeMode: ThemeMode.system, onThemeChanged: (_) {}),
+        brightness: Brightness.dark,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await expectLater(
+      find.byType(SettingsScreen),
+      matchesGoldenFile('goldens/settings-dark.png'),
     );
   });
 

@@ -69,8 +69,9 @@ Other pushes use an event envelope:
 Task events carry `kind` (`completed`, `blocked`, `ranger`), `title`, `body`,
 and optionally `agent`, `workspace_id`, `tab_id`, `pane_id`. The bridge emits
 `completed` and `blocked` when a herdr pane leaves `working`; the first status
-snapshot only seeds state. Ranger also pushes `{"assistant": {…}}` and
-`{"assistant_notification": {…}}` snapshots.
+snapshot only seeds state. Clients use the optional `workspace_id`, `tab_id` and
+`pane_id` to deep-link a notification tap to the matching pane. Ranger also
+pushes `{"assistant": {…}}` and `{"assistant_notification": {…}}` snapshots.
 
 ## Methods
 

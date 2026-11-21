@@ -1,4 +1,7 @@
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'dart:async';
+
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, kIsWeb, TargetPlatform;
 import 'package:material_ui/material_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -401,6 +404,8 @@ class SettingsScreen extends StatelessWidget {
                     : null,
               ),
             ),
+          if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android)
+            const _BatteryOptimizationTile(),
           _Section('Connection'),
           SwitchListTile(
             title: Text(
@@ -590,6 +595,57 @@ Future<void> _confirmDisconnect(BuildContext context, AppState state) async {
     ),
   );
   if (yes == true) await state.disconnect();
+}
+
+class _BatteryOptimizationTile extends StatefulWidget {
+  const _BatteryOptimizationTile();
+
+  @override
+  State<_BatteryOptimizationTile> createState() =>
+      _BatteryOptimizationTileState();
+}
+
+class _BatteryOptimizationTileState extends State<_BatteryOptimizationTile> {
+  bool? _ignoring;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_refresh());
+  }
+
+  Future<void> _refresh() async {
+    final value = await NotificationService.instance
+        .isIgnoringBatteryOptimizations();
+    if (mounted) setState(() => _ignoring = value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final ignoring = _ignoring;
+    return ListTile(
+      title: Text('Battery optimization', style: monoStyle(context, size: 12)),
+      subtitle: Text(
+        ignoring == null
+            ? 'Checking…'
+            : ignoring
+            ? 'Droves is exempt; background alerts are less likely to be delayed'
+            : 'Android may delay agent alerts. Tap to request an exemption.',
+        style: monoStyle(context, size: 11, color: c.muted),
+      ),
+      trailing: ignoring == true
+          ? Icon(Icons.check, size: 18, color: c.muted)
+          : Icon(Icons.battery_saver, size: 18, color: c.muted),
+      onTap: ignoring == true
+          ? null
+          : () async {
+              await NotificationService.instance
+                  .requestIgnoreBatteryOptimizations();
+              await _refresh();
+            },
+    );
+  }
 }
 
 /// shares prefs with the terminal's tune button; edits show up in either place
