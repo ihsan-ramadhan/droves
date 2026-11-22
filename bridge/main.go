@@ -68,6 +68,7 @@ func usage() {
 Usage:
   droves-bridge [flags]            run the bridge (default)
   droves-bridge stop               stop the managed bridge
+  droves-bridge status             show whether the bridge is running
   droves-bridge restart            restart the managed bridge
   droves-bridge autostart [flags]  manage login/boot start
   droves-bridge update [flags]     update and restart from GitHub Releases
@@ -110,6 +111,8 @@ func dispatch(args []string) {
 		os.Exit(runStop())
 	case "restart":
 		os.Exit(runRestart())
+	case "status":
+		os.Exit(runStatus())
 	case "autostart":
 		os.Exit(runAutostart(args[1:]))
 	case "update":
@@ -123,6 +126,43 @@ func dispatch(args []string) {
 		usage()
 		os.Exit(2)
 	}
+}
+
+// runStatus probes the health endpoint and reports whether the bridge is
+// answering, which manager runs it (if any), and the autostart state.
+func runStatus() int {
+	addr := os.Getenv("DROVES_BRIDGE_ADDR")
+	if addr == "" {
+		addr = "127.0.0.1:13030"
+	}
+	managed := autostartActive()
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get("http://" + addr + "/api/health")
+	if err != nil {
+		if managed {
+			fmt.Printf("droves-bridge service is enabled but not answering on %s\n", addr)
+			return 1
+		}
+		fmt.Println("droves-bridge is not running")
+		return 1
+	}
+	defer resp.Body.Close()
+	var health struct {
+		OK      bool   `json:"ok"`
+		Version string `json:"version"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&health)
+	if health.Version != "" {
+		fmt.Printf("droves-bridge %s is running at %s\n", health.Version, addr)
+	} else {
+		fmt.Printf("droves-bridge is running at %s\n", addr)
+	}
+	if managed {
+		fmt.Println("autostart: enabled (managed service)")
+	} else {
+		fmt.Println("autostart: not enabled (manual process)")
+	}
+	return 0
 }
 
 func runServer(args ...string) {

@@ -68,6 +68,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
   bool _showKeyBar = false;
   bool _hasSelection = false;
   bool _split = false;
+  bool _altBuffer = false;
   int _wideCols = 0;
   int _wideRows = 0;
   String _message = 'Opening terminal';
@@ -82,6 +83,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
     _agent = widget.pane.agent;
     _agentStatus = widget.pane.agentStatus;
     _terminal = Terminal(maxLines: 20000, inputHandler: drovesInputHandler);
+    _terminal.addListener(_onBufferChange);
     _controller = TerminalController();
     _terminal.onOutput = (data) {
       _pushGrid();
@@ -184,10 +186,17 @@ class _TerminalScreenState extends State<TerminalScreen> {
     }
   }
 
+  void _onBufferChange() {
+    final alt = _terminal.isUsingAltBuffer;
+    if (!mounted || alt == _altBuffer) return;
+    setState(() => _altBuffer = alt);
+  }
+
   @override
   void dispose() {
     _agentPoll?.cancel();
     _sub?.cancel();
+    _terminal.removeListener(_onBufferChange);
     if (_attached) {
       _bridgeRef?.detach(widget.pane.terminalId).catchError((_) {});
     }
@@ -529,7 +538,8 @@ class _TerminalScreenState extends State<TerminalScreen> {
                         ),
                       ),
                     ),
-                  if (_attached)
+                  // alt-screen apps own their scrollback; wheel goes to xterm
+                  if (_attached && !_altBuffer)
                     Positioned.fill(
                       child: _ServerScrollCatcher(onScroll: _serverScroll),
                     ),

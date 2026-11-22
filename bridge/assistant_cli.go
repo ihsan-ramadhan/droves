@@ -58,20 +58,22 @@ func findAssistantCLI(name string) (assistantCLI, bool) {
 // or an HTTP request. state is the CLI-specific session handle captured from
 // the previous run; history is the Scout transcript for stateless drivers.
 type assistantInvoke struct {
-	ctx        context.Context
-	cli        assistantCLI
-	sessionDir string // per Scout session, adapter-owned layout inside
-	hasSession bool   // a previous run left resumable state in sessionDir
-	state      string // CLI session id captured from the previous run
-	text       string
-	modelRef   string // provider/id as configured
-	modelID    string // bare model id for endpoint drivers
-	thinking   string
-	cwd        string
-	extraDirs  []string
-	endpoint   string // openai driver: base URL
-	apiKey     string // openai driver: bearer token, may be empty
-	history    []scoutMessage
+	ctx          context.Context
+	cli          assistantCLI
+	sessionDir   string // per Scout session, adapter-owned layout inside
+	hasSession   bool   // a previous run left resumable state in sessionDir
+	state        string // CLI session id captured from the previous run
+	text         string
+	modelRef     string // provider/id as configured
+	modelID      string // bare model id for endpoint drivers
+	thinking     string
+	cwd          string
+	extraDirs    []string
+	endpoint     string // openai driver: base URL
+	apiKey       string // openai driver: bearer token, may be empty
+	history      []scoutMessage
+	srv          *Server  // bridge internals for workspace-read tools (openai driver)
+	workspaceIDs []string // allowed workspace ids; empty means all
 }
 
 // runAssistant executes the driver and returns the answer plus any new
@@ -99,7 +101,7 @@ func runAssistant(iv assistantInvoke) (answer, newState string, err error) {
 	if err != nil {
 		msg := strings.TrimSpace(stderr.String())
 		if msg == "" {
-			msg = strings.TrimSpace(stdout.String())
+			msg = scoutCLIErrorText(stdout.Bytes())
 		}
 		if answer == "" && msg != "" {
 			return "", newState, errors.New(truncate(msg, 2000))
@@ -178,8 +180,28 @@ func extractScoutState(cli string, stdout []byte, prev string) string {
 	return prev
 }
 
-// runOpenAI drives any OpenAI-compatible chat endpoint. History lives in
-// scout.json, so every call is stateless and self-contained.
+// OpenAI chat message shapes; ToolCalls/ToolCallID stay empty for plain text.
+type oaiToolCall struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
+}
+
+type oaiMessage struct {
+	Role       string        `json:"role"`
+	Content    string        `json:"content,omitempty"`
+	ToolCalls  []oaiToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string        `json:"tool_call_id,omitempty"`
+}
+
+const openAIMaxToolRounds = 25
+
+// runOpenAI drives any OpenAI-compatible chat endpoint with workspace tools.
+// History lives in scout.json, so every call is stateless and self-contained;
+// the tool loop runs inside this single invocation.
 func runOpenAI(iv assistantInvoke) (string, string, error) {
 	if iv.endpoint == "" {
 		return "", "", errors.New("openai driver needs a base URL")
@@ -187,91 +209,120 @@ func runOpenAI(iv assistantInvoke) (string, string, error) {
 	if iv.modelID == "" {
 		return "", "", errors.New("openai driver needs a model")
 	}
-	type msg struct {
-		Role    string `json:"role"`
-		Content string `json:"content"`
-	}
-	messages := []msg{{Role: "system", Content: openAISystemPrompt(iv)}}
+	messages := []oaiMessage{{Role: "system", Content: openAISystemPrompt(iv)}}
 	for _, m := range iv.history {
-		role := m.Role
-		if role == "user" {
+		role := "assistant"
+		if m.Role == "user" {
 			role = "user"
-		} else {
-			role = "assistant"
 		}
-		messages = append(messages, msg{Role: role, Content: m.Text})
+		messages = append(messages, oaiMessage{Role: role, Content: m.Text})
 	}
-	// history already ends with the current user text
-	body, err := json.Marshal(map[string]any{
-		"model":    iv.modelID,
-		"messages": messages,
-		"stream":   false,
-	})
-	if err != nil {
-		return "", "", err
-	}
+	tools := scoutOpenAITools()
+	tc := newScoutToolContext(iv)
 	url := strings.TrimRight(iv.endpoint, "/") + "/chat/completions"
-	req, err := http.NewRequestWithContext(iv.ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return "", "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if iv.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+iv.apiKey)
-	}
 	client := &http.Client{Timeout: 12 * time.Minute}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", "", err
-	}
-	defer resp.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
-	if err != nil {
-		return "", "", err
-	}
-	if resp.StatusCode != http.StatusOK {
-		msg := strings.TrimSpace(string(data))
-		if len(msg) > 500 {
-			msg = msg[:500]
+
+	for range openAIMaxToolRounds {
+		bodyMap := map[string]any{
+			"model":    iv.modelID,
+			"messages": messages,
+			"stream":   false,
 		}
-		return "", "", fmt.Errorf("endpoint returned %d: %s", resp.StatusCode, msg)
+		if tools != nil {
+			bodyMap["tools"] = tools
+			bodyMap["tool_choice"] = "auto"
+		}
+		body, err := json.Marshal(bodyMap)
+		if err != nil {
+			return "", "", err
+		}
+		req, err := http.NewRequestWithContext(iv.ctx, http.MethodPost, url, bytes.NewReader(body))
+		if err != nil {
+			return "", "", err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if iv.apiKey != "" {
+			req.Header.Set("Authorization", "Bearer "+iv.apiKey)
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return "", "", err
+		}
+		data, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
+		resp.Body.Close()
+		if err != nil {
+			return "", "", err
+		}
+		if resp.StatusCode != http.StatusOK {
+			msg := strings.TrimSpace(string(data))
+			if len(msg) > 500 {
+				msg = msg[:500]
+			}
+			// endpoints without tool support reject the tools field; fall back
+			// to plain chat once instead of failing the whole turn
+			if tools != nil && resp.StatusCode == http.StatusBadRequest &&
+				(strings.Contains(strings.ToLower(msg), "tool") || strings.Contains(strings.ToLower(msg), "function")) {
+				tools = nil
+				continue
+			}
+			return "", "", fmt.Errorf("endpoint returned %d: %s", resp.StatusCode, msg)
+		}
+		var out struct {
+			Choices []struct {
+				Message oaiMessage `json:"message"`
+			} `json:"choices"`
+			Error *struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if json.Unmarshal(data, &out) != nil {
+			return "", "", errors.New("endpoint returned invalid JSON")
+		}
+		if out.Error != nil && out.Error.Message != "" {
+			return "", "", errors.New(truncate(out.Error.Message, 500))
+		}
+		if len(out.Choices) == 0 {
+			return "", "", errors.New("endpoint returned no choices")
+		}
+		msg := out.Choices[0].Message
+		if len(msg.ToolCalls) == 0 {
+			answer := strings.TrimSpace(msg.Content)
+			if answer == "" {
+				return "", "", errors.New("Scout returned no answer")
+			}
+			return answer, "", nil
+		}
+		// echo the assistant turn with its tool calls, then answer each call
+		messages = append(messages, msg)
+		for _, call := range msg.ToolCalls {
+			var args json.RawMessage
+			if call.Function.Arguments != "" {
+				args = json.RawMessage(call.Function.Arguments)
+			}
+			result := callScoutTool(tc, call.Function.Name, args)
+			messages = append(messages, oaiMessage{
+				Role:       "tool",
+				ToolCallID: call.ID,
+				Content:    result,
+			})
+		}
 	}
-	var out struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-		Error *struct {
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	if json.Unmarshal(data, &out) != nil {
-		return "", "", errors.New("endpoint returned invalid JSON")
-	}
-	if out.Error != nil && out.Error.Message != "" {
-		return "", "", errors.New(truncate(out.Error.Message, 500))
-	}
-	if len(out.Choices) == 0 {
-		return "", "", errors.New("endpoint returned no choices")
-	}
-	answer := strings.TrimSpace(out.Choices[0].Message.Content)
-	if answer == "" {
-		return "", "", errors.New("Scout returned no answer")
-	}
-	return answer, "", nil
+	return "", "", errors.New("Scout exceeded the tool-call limit")
 }
 
 func openAISystemPrompt(iv assistantInvoke) string {
 	var b strings.Builder
-	b.WriteString("You are Scout, a coding assistant running inside the Droves bridge. " +
-		"You can read files, run commands, and edit code in the workspace you were started in. " +
-		"Answer concisely.")
+	b.WriteString("You are Scout, a coding assistant running on the user's machine via the Droves bridge. " +
+		"Use the provided tools to inspect and change the workspace: read_file, list_dir, write_file, run_command. " +
+		"You can also inspect the Droves workspace itself: workspace_status lists workspaces, panes and agents; " +
+		"agent_history reads an agent's transcript; workspace_diff shows git changes; terminal_output reads pane output. " +
+		"Paths are relative to the working directory; absolute paths must stay inside the allowed roots. " +
+		"Verify your work with tools before claiming success. Keep final answers concise.")
 	if iv.cwd != "" && iv.cwd != iv.sessionDir {
 		fmt.Fprintf(&b, " Working directory: %s.", iv.cwd)
 	}
 	if len(iv.extraDirs) > 0 {
-		fmt.Fprintf(&b, " Additional directories: %s.", strings.Join(iv.extraDirs, ", "))
+		fmt.Fprintf(&b, " Additional allowed directories: %s.", strings.Join(iv.extraDirs, ", "))
 	}
 	return b.String()
 }

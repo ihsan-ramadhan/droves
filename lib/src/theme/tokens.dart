@@ -10,6 +10,7 @@ class DrovesColors extends ThemeExtension<DrovesColors> {
     required this.muted,
     required this.rule,
     required this.accent,
+    required this.error,
     required this.terminalBg,
     required this.terminalFg,
   });
@@ -20,6 +21,7 @@ class DrovesColors extends ThemeExtension<DrovesColors> {
   final Color muted;
   final Color rule;
   final Color accent;
+  final Color error;
   final Color terminalBg;
   final Color terminalFg;
 
@@ -30,6 +32,7 @@ class DrovesColors extends ThemeExtension<DrovesColors> {
     muted: Color(0xFF6E675C),
     rule: Color(0xFFD9D1C1),
     accent: Color(0xFFA8471F),
+    error: Color(0xFF9E2B25),
     terminalBg: Color(0xFF23211D),
     terminalFg: Color(0xFFEDE8DE),
   );
@@ -42,6 +45,7 @@ class DrovesColors extends ThemeExtension<DrovesColors> {
     rule: Color(0xFF332F29),
     accent: Color(0xFFD9642F),
     terminalBg: Color(0xFF100F0D),
+    error: Color(0xFFD9514A),
     terminalFg: Color(0xFFEDE8DE),
   );
 
@@ -53,6 +57,7 @@ class DrovesColors extends ThemeExtension<DrovesColors> {
     Color? muted,
     Color? rule,
     Color? accent,
+    Color? error,
     Color? terminalBg,
     Color? terminalFg,
   }) {
@@ -64,6 +69,7 @@ class DrovesColors extends ThemeExtension<DrovesColors> {
       rule: rule ?? this.rule,
       accent: accent ?? this.accent,
       terminalBg: terminalBg ?? this.terminalBg,
+      error: error ?? this.error,
       terminalFg: terminalFg ?? this.terminalFg,
     );
   }
@@ -80,6 +86,7 @@ class DrovesColors extends ThemeExtension<DrovesColors> {
       accent: Color.lerp(accent, other.accent, t)!,
       terminalBg: Color.lerp(terminalBg, other.terminalBg, t)!,
       terminalFg: Color.lerp(terminalFg, other.terminalFg, t)!,
+      error: Color.lerp(error, other.error, t)!,
     );
   }
 }

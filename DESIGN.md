@@ -16,7 +16,7 @@ only repeated gesture in the product.
 
 ## Palette
 
-Two cores plus one accent, warm and paper-like rather than terminal-black.
+Two cores, one accent and one error color, warm and paper-like rather than terminal-black.
 
 | Token | Light | Dark | Reason |
 |---|---|---|---|
@@ -24,6 +24,7 @@ Two cores plus one accent, warm and paper-like rather than terminal-black.
 | `paper` | `#F4EFE4` | `#151412` | Surface: unbleached paper, so the terminal pane reads as a window cut into it |
 | `muted` | `#6E675C` | `#9A9184` | Secondary text and rules |
 | `accent` | `#A8471F` | `#D9642F` | Rust: the one accent. Used only for "needs you" and the current position mark |
+| `error` | `#9E2B25` | `#D9514A` | Destructive confirmations and stopping work already in progress |
 
 No gradient anywhere. No glow. One accent, one place: a waiting agent.
 

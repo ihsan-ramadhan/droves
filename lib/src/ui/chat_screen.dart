@@ -1593,7 +1593,7 @@ class _Composer extends StatelessWidget {
         color: c.paper,
         border: Border(top: BorderSide(color: c.rule)),
       ),
-      padding: const EdgeInsets.fromLTRB(Space.sm, Space.sm, Space.sm, 0),
+      padding: const EdgeInsets.all(Space.sm),
       child: SafeArea(
         top: false,
         child: Column(
@@ -1614,7 +1614,7 @@ class _Composer extends StatelessWidget {
                     runSpacing: Space.xs,
                     children: [
                       for (var i = 0; i < staged.length; i++)
-                        _StagedChip(
+                        StagedChip(
                           name: staged[i].name,
                           onRemove: () => onRemove(i),
                         ),
@@ -1663,87 +1663,30 @@ class _Composer extends StatelessWidget {
                     ),
                   ),
                 ),
-                IconButton(
-                  onPressed: onInterrupt,
-                  color: active ? c.accent : c.muted,
-                  tooltip: 'Interrupt (Esc)',
-                  icon: const Icon(Icons.stop_circle_outlined, size: 20),
-                ),
                 const SizedBox(width: Space.xs),
                 SizedBox(
                   height: 44,
                   width: 44,
                   child: IconButton.filled(
-                    onPressed: sending ? null : onSend,
+                    onPressed: active ? onInterrupt : (sending ? null : onSend),
                     style: IconButton.styleFrom(
-                      backgroundColor: c.ink,
+                      backgroundColor: active ? c.error : c.ink,
                       foregroundColor: c.paper,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(Radii.row),
                       ),
                     ),
-                    tooltip: 'Send',
-                    icon: sending
-                        ? SizedBox(
-                            width: 14,
-                            height: 14,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 1.6,
-                              color: c.paper,
-                            ),
-                          )
-                        : const Icon(Icons.arrow_upward, size: 18),
+                    tooltip: active ? 'Interrupt (Esc)' : 'Send',
+                    icon: Icon(
+                      active ? Icons.stop : Icons.arrow_upward,
+                      size: 18,
+                    ),
                   ),
                 ),
               ],
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-/// the agent receives the remote path; the chip shows only the picked name
-class _StagedChip extends StatelessWidget {
-  const _StagedChip({required this.name, required this.onRemove});
-
-  final String name;
-  final VoidCallback onRemove;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(Space.sm, 4, 4, 4),
-      decoration: BoxDecoration(
-        color: c.surface,
-        border: Border.all(color: c.rule),
-        borderRadius: BorderRadius.circular(Radii.row),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.attach_file, size: 13, color: c.muted),
-          const SizedBox(width: 4),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 200),
-            child: Text(
-              name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: monoStyle(context, size: 11),
-            ),
-          ),
-          InkWell(
-            onTap: onRemove,
-            borderRadius: BorderRadius.circular(Radii.row),
-            child: Padding(
-              padding: const EdgeInsets.all(3),
-              child: Icon(Icons.close, size: 13, color: c.muted),
-            ),
-          ),
-        ],
       ),
     );
   }

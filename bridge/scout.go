@@ -20,6 +20,7 @@ type Scout struct {
 	state    *scoutState
 	models   []map[string]any
 	modelsAt time.Time
+	cancels  map[string]context.CancelFunc
 }
 
 type scoutState struct {
@@ -53,7 +54,7 @@ type scoutMessage struct {
 }
 
 func NewScout(srv *Server) *Scout {
-	r := &Scout{srv: srv}
+	r := &Scout{srv: srv, cancels: map[string]context.CancelFunc{}}
 	// one-time move of legacy omp session dirs into the per-CLI layout
 	legacy := filepath.Join(srv.cfg.StateDir, "ranger")
 	scout := filepath.Join(srv.cfg.StateDir, "scout")
@@ -125,6 +126,10 @@ func (r *Scout) Handle(ctx context.Context, method string, p map[string]any) (an
 		return r.NewSession()
 	case "bridge.assistant.select_session":
 		return r.Select(asString(p, "session_id"))
+	case "bridge.assistant.delete_session":
+		return r.DeleteSession(asString(p, "session_id"))
+	case "bridge.assistant.stop":
+		return r.Stop(asString(p, "session_id"))
 	}
 	return nil, fmt.Errorf("unknown assistant method: %s", method)
 }
@@ -258,6 +263,64 @@ func (r *Scout) Select(id string) (any, error) {
 	return map[string]any{"session_id": id}, nil
 }
 
+// Stop cancels the in-flight CLI run for a session. The run's completion
+// path clears Running and pushes a fresh snapshot to all clients.
+func (r *Scout) Stop(sessionID string) (any, error) {
+	if sessionID == "" {
+		return nil, errors.New("session_id is required")
+	}
+	r.mu.Lock()
+	cancel, ok := r.cancels[sessionID]
+	r.mu.Unlock()
+	if !ok {
+		return map[string]any{"stopped": false}, nil
+	}
+	cancel()
+	return map[string]any{"stopped": true}, nil
+}
+
+// DeleteSession removes a chat and its bridge-side CLI session dirs. The
+// pi/omp transcripts inside the agent's own store are left in place.
+func (r *Scout) DeleteSession(id string) (any, error) {
+	if id == "" {
+		return nil, errors.New("session_id is required")
+	}
+	r.mu.Lock()
+	kept := make([]*scoutSession, 0, len(r.state.Sessions))
+	var removed *scoutSession
+	for _, sess := range r.state.Sessions {
+		if sess.ID == id {
+			removed = sess
+			continue
+		}
+		kept = append(kept, sess)
+	}
+	if removed == nil {
+		r.mu.Unlock()
+		return nil, errors.New("session not found")
+	}
+	r.state.Sessions = kept
+	if r.state.Active == id {
+		r.state.Active = ""
+	}
+	if r.state.Active == "" || r.state.session(r.state.Active) == nil {
+		if len(r.state.Sessions) > 0 {
+			r.state.Active = r.state.Sessions[0].ID
+		} else {
+			r.ensureSession(r.state)
+		}
+	}
+	r.saveLocked()
+	snapshot := r.snapshotLocked()
+	r.mu.Unlock()
+	// drop per-CLI session dirs for every known driver
+	for _, cli := range assistantCLIs {
+		_ = os.RemoveAll(sessionDirFor(r.srv.cfg.StateDir, cli.name, id))
+	}
+	r.push(snapshot)
+	return map[string]any{"session_id": id}, nil
+}
+
 func (r *Scout) Send(ctx context.Context, p map[string]any) (any, error) {
 	text := strings.TrimSpace(asString(p, "text"))
 	if text == "" {
@@ -369,6 +432,9 @@ func (r *Scout) run(sessionID, text string, cfg scoutConfig) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
 	r.mu.Lock()
+	r.cancels[sessionID] = cancel
+	r.mu.Unlock()
+	r.mu.Lock()
 	sess := r.state.session(sessionID)
 	var history []scoutMessage
 	cliState := ""
@@ -378,14 +444,18 @@ func (r *Scout) run(sessionID, text string, cfg scoutConfig) {
 	}
 	r.mu.Unlock()
 	answer, newState, err := r.invoke(ctx, sessionID, text, cfg, history, cliState)
+	canceled := ctx.Err() == context.Canceled
 	r.mu.Lock()
+	delete(r.cancels, sessionID)
 	sess = r.state.session(sessionID)
 	if sess != nil {
 		sess.Running = false
 		if newState != "" {
 			sess.CLIState = newState
 		}
-		if err != nil {
+		if canceled {
+			// user stopped the run: clear running, leave no answer
+		} else if err != nil {
 			sess.Messages = append(sess.Messages, scoutMessage{Role: "assistant", Text: "Scout failed: " + err.Error()})
 		} else if answer != "" {
 			sess.Messages = append(sess.Messages, scoutMessage{Role: "assistant", Text: answer})
@@ -398,6 +468,9 @@ func (r *Scout) run(sessionID, text string, cfg scoutConfig) {
 	r.mu.Unlock()
 	if active == sessionID {
 		r.push(snapshot)
+	}
+	if canceled {
+		return
 	}
 	if err != nil {
 		r.srv.notifyAll(map[string]any{"assistant_notification": map[string]any{
@@ -424,36 +497,57 @@ func (r *Scout) invoke(ctx context.Context, sessionID, text string, cfg scoutCon
 		return "", "", err
 	}
 	var roots []string
+	var workspaceIDs []string
+	rootByID := map[string]string{}
 	for _, ref := range cfg.AllowedWorkspaces {
 		if asString(ref, "connection_id") != "" && asString(ref, "connection_id") != "local" {
 			continue
 		}
-		if root := snap.WorkspaceRoot(asString(ref, "workspace_id")); root != "" {
+		id := asString(ref, "workspace_id")
+		if root := snap.WorkspaceRoot(id); root != "" {
 			roots = append(roots, root)
+			workspaceIDs = append(workspaceIDs, id)
+			rootByID[id] = root
 		}
 	}
+	// Scout works on the workspace the user is actually looking at: the focused
+	// herdr workspace wins as cwd; the rest become additional allowed dirs.
 	cwd := r.srv.cfg.StateDir
 	var extra []string
 	if len(roots) > 0 {
 		cwd = roots[0]
-		extra = roots[1:]
+		if focusedRoot := rootByID[snap.FocusedWorkspaceID]; focusedRoot != "" {
+			cwd = focusedRoot
+		}
+		for _, root := range roots {
+			if root != cwd {
+				extra = append(extra, root)
+			}
+		}
 	}
 	sessionDir := sessionDirFor(r.srv.cfg.StateDir, cliName, sessionID)
+	// CLI drivers (omp/pi) have no workspace tools, so hand them ground truth
+	// about which herdr workspace is focused instead of letting them guess.
+	if cliName != "openai" {
+		text = scoutWorkspaceContext(snap, cwd, roots) + "\n\n" + text
+	}
 	iv := assistantInvoke{
-		ctx:        ctx,
-		cli:        cli,
-		sessionDir: sessionDir,
-		hasSession: hasSessionFile(sessionDir),
-		state:      cliState,
-		text:       text,
-		modelRef:   cfg.Provider + "/" + cfg.Model,
-		modelID:    cfg.Model,
-		thinking:   cfg.ThinkingLevel,
-		cwd:        cwd,
-		extraDirs:  extra,
-		endpoint:   cfg.BaseURL,
-		apiKey:     cfg.APIKey,
-		history:    history,
+		ctx:          ctx,
+		cli:          cli,
+		sessionDir:   sessionDir,
+		hasSession:   hasSessionFile(sessionDir),
+		state:        cliState,
+		text:         text,
+		modelRef:     cfg.Provider + "/" + cfg.Model,
+		modelID:      cfg.Model,
+		thinking:     cfg.ThinkingLevel,
+		cwd:          cwd,
+		extraDirs:    extra,
+		endpoint:     cfg.BaseURL,
+		apiKey:       cfg.APIKey,
+		history:      history,
+		srv:          r.srv,
+		workspaceIDs: workspaceIDs,
 	}
 	return runAssistant(iv)
 }
@@ -469,6 +563,40 @@ func hasSessionFile(dir string) bool {
 		}
 	}
 	return false
+}
+
+// scoutWorkspaceContext renders a compact snapshot of herdr workspaces for
+// CLI drivers that cannot call workspace tools themselves.
+func scoutWorkspaceContext(snap *Snapshot, cwd string, roots []string) string {
+	var b strings.Builder
+	b.WriteString("[Droves context — live herdr snapshot]")
+	if w := snap.Workspace(snap.FocusedWorkspaceID); w != nil {
+		root := snap.WorkspaceRoot(w.WorkspaceID)
+		allowed := false
+		for _, r := range roots {
+			if r == root {
+				allowed = true
+				break
+			}
+		}
+		if allowed {
+			fmt.Fprintf(&b, " Focused workspace: %s (%q), root %s — this is your working directory.", w.WorkspaceID, w.Label, root)
+		} else {
+			fmt.Fprintf(&b, " The user is focused on workspace %s (%q), but it is outside Scout's allowed workspaces, so you cannot work there.", w.WorkspaceID, w.Label)
+		}
+	} else {
+		b.WriteString(" No workspace is focused right now.")
+	}
+	fmt.Fprintf(&b, " Your working directory is %s.", cwd)
+	if len(roots) > 1 {
+		b.WriteString(" Allowed workspace roots:")
+		for _, root := range roots {
+			fmt.Fprintf(&b, " %s", root)
+		}
+		b.WriteString(".")
+	}
+	b.WriteString(" The focus can change while you work; trust this snapshot, not memory.")
+	return b.String()
 }
 
 func parseScoutOutput(data []byte) string {
@@ -511,6 +639,47 @@ func parseScoutOutput(data []byte) string {
 		}
 	}
 	return answer
+}
+
+// scoutCLIErrorText turns a failed CLI run's stdout into a readable error.
+// JSON-mode drivers (omp, pi) print session JSONL on stdout even when the
+// run fails, so a raw dump would leak event noise into the chat; extract the
+// provider's error message instead. Plain-text stdout passes through.
+func scoutCLIErrorText(stdout []byte) string {
+	trimmed := strings.TrimSpace(string(stdout))
+	if trimmed == "" {
+		return ""
+	}
+	if !strings.HasPrefix(trimmed, "{") {
+		return trimmed
+	}
+	// JSONL: hunt for an errorMessage/error field in any event
+	sc := bufio.NewScanner(bytes.NewReader(stdout))
+	sc.Buffer(make([]byte, 64*1024), 16*1024*1024)
+	var last string
+	for sc.Scan() {
+		var ev map[string]any
+		if json.Unmarshal(sc.Bytes(), &ev) != nil {
+			continue
+		}
+		for _, key := range []string{"errorMessage", "error", "message"} {
+			if s, ok := ev[key].(string); ok && strings.TrimSpace(s) != "" {
+				last = s
+			}
+		}
+		// omp nests the error inside the assistant message object
+		if m, ok := ev["message"].(map[string]any); ok {
+			for _, key := range []string{"errorMessage", "error"} {
+				if s, ok := m[key].(string); ok && strings.TrimSpace(s) != "" {
+					last = s
+				}
+			}
+		}
+	}
+	if last != "" {
+		return last
+	}
+	return "the assistant CLI failed without an error message"
 }
 
 func (r *Scout) Models(ctx context.Context) []map[string]any {

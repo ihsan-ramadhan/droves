@@ -41,17 +41,21 @@ jobs:
           else
             base="${BASE:-$BEFORE}"
             # a new branch reports an all-zero before sha; fall back to its root
-            if [ -z "$base" ] || [ "$base" = 0000000000000000000000000000000000000000 ]; then
+            if [ -z "$base" ] || \
+               [ "$base" = 0000000000000000000000000000000000000000 ]; then
               base="$(git rev-list --max-parents=0 HEAD | tail -1)"
             fi
             changed="$(git diff --name-only "$base" "$GITHUB_SHA")"
           fi
           printf '%s\n' "$changed"
 
-          match() { printf '%s\n' "$changed" | grep -Eq "$1" && echo true || echo false; }
+          match() {
+            printf '%s\n' "$changed" | grep -Eq "$1" && echo true || echo false
+          }
           # Dart sources, pubspec, bundled assets and this workflow feed every
           # client build; a workflow edit must exercise the builds it changes
-          shared='^(lib/|test/|assets/|pubspec\.(yaml|lock)|analysis_options\.yaml|\.github/workflows/ci\.yml)'
+          shared='^(lib/|test/|assets/|pubspec\.(yaml|lock)|'
+          shared+='analysis_options\.yaml|\.github/workflows/ci\.yml)'
           {
             echo "android=$(match "$shared|^android/")"
             echo "web=$(match "$shared|^web/")"
@@ -74,13 +78,31 @@ jobs:
       - run: flutter analyze
       - run: flutter test --exclude-tags live
 
+  go-test:
+    name: Bridge tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: bridge/go.mod
+          cache-dependency-path: bridge/go.sum
+      - run: go vet ./...
+        working-directory: bridge
+      - run: go test ./...
+        working-directory: bridge
+
   build-android:
     name: Android APK
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [changes, analyze-test]
-    # release builds prove the toolchain on main; a PR only needs analyze and test
-    if: github.event_name != 'pull_request' && needs.changes.outputs.android == 'true'
+    # release builds prove the toolchain on main; a PR only needs analyze
+    # and test
+    if: >-
+      github.event_name != 'pull_request' &&
+      needs.changes.outputs.android == 'true'
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-java@v6
@@ -111,7 +133,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: [changes, analyze-test]
-    if: github.event_name != 'pull_request' && needs.changes.outputs.web == 'true'
+    if: >-
+      github.event_name != 'pull_request' &&
+      needs.changes.outputs.web == 'true'
     steps:
       - uses: actions/checkout@v7
       - uses: subosito/flutter-action@v2

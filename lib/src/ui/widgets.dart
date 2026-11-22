@@ -328,3 +328,48 @@ class SkeletonRows extends StatelessWidget {
     );
   }
 }
+
+/// the agent receives the remote path; the chip shows only the picked name
+class StagedChip extends StatelessWidget {
+  const StagedChip({super.key, required this.name, required this.onRemove});
+
+  final String name;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(Space.sm, 4, 4, 4),
+      decoration: BoxDecoration(
+        color: c.surface,
+        border: Border.all(color: c.rule),
+        borderRadius: BorderRadius.circular(Radii.row),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.attach_file, size: 13, color: c.muted),
+          const SizedBox(width: 4),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 200),
+            child: Text(
+              name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: monoStyle(context, size: 11),
+            ),
+          ),
+          InkWell(
+            onTap: onRemove,
+            borderRadius: BorderRadius.circular(Radii.row),
+            child: Padding(
+              padding: const EdgeInsets.all(3),
+              child: Icon(Icons.close, size: 13, color: c.muted),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

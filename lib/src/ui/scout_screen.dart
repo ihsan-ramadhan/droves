@@ -1,7 +1,9 @@
 import 'dart:async';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../bridge/bridge.dart';
 import '../theme/tokens.dart';
 import 'widgets.dart';
 
@@ -47,6 +49,15 @@ class ScoutScreen extends StatefulWidget {
 
 class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
   final _input = TextEditingController();
+  final _search = TextEditingController();
+  final _searchFocus = FocusNode();
+  bool _searching = false;
+  int _searchIndex = 0;
+  final _matchKeys = <int, GlobalKey>{};
+  final List<StagedFile> _staged = [];
+  List<Map<String, dynamic>> _workspaces = const [];
+  bool _uploading = false;
+  bool _multiline = false;
   final _scroll = ScrollController();
   List<ScoutMessage> _messages = const [];
   List<ScoutModel> _models = const [];
@@ -58,6 +69,17 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
   bool _running = false;
   String? _error;
   StreamSubscription<Map<String, dynamic>>? _sub;
+
+  @override
+  void initState() {
+    super.initState();
+    _input.addListener(_syncMultiline);
+  }
+
+  void _syncMultiline() {
+    final multi = _input.text.contains('\n');
+    if (multi != _multiline) setState(() => _multiline = multi);
+  }
 
   @override
   void onBridgeReady() {
@@ -89,6 +111,7 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
           )
           .where((m) => m.text.isNotEmpty)
           .toList();
+      if (_search.text.trim().isNotEmpty) _searchIndex = 0;
       _loading = false;
     });
   }
@@ -117,12 +140,212 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
   void dispose() {
     _sub?.cancel();
     _input.dispose();
+    _search.dispose();
+    _searchFocus.dispose();
     _scroll.dispose();
     super.dispose();
   }
 
+  Future<void> _loadWorkspaces() async {
+    try {
+      final r = await bridge.call('workspace.list');
+      if (!mounted) return;
+      setState(() {
+        _workspaces = ((r['workspaces'] as List?) ?? const [])
+            .cast<Map<String, dynamic>>();
+      });
+    } catch (_) {
+      // picker stays empty with a hint if herdr isn't reachable
+    }
+  }
+
+  Future<void> _pickWorkspaces() async {
+    if (_workspaces.isEmpty) await _loadWorkspaces();
+    if (!mounted) return;
+    final c = context.colors;
+    final allowed = ((_config['allowed_workspaces'] as List?) ?? const [])
+        .whereType<Map>()
+        .map((m) => m['workspace_id'])
+        .toSet();
+    final selection = <dynamic>{...allowed};
+    final picked = await showModalBottomSheet<List<String>>(
+      context: context,
+      backgroundColor: c.paper,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(Radii.card)),
+      ),
+      builder: (sheet) => SafeArea(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 560),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  Space.md,
+                  Space.md,
+                  Space.md,
+                  Space.sm,
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Scout workspaces',
+                        style: nameStyle(context, size: 18),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () =>
+                          Navigator.of(sheet).pop(allowed.toList()),
+                      child: Text(
+                        'Cancel',
+                        style: monoStyle(context, size: 12, color: c.muted),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () =>
+                          Navigator.of(sheet)
+                              .pop(selection.map((e) => e as String).toList()),
+                      child: Text(
+                        'Save',
+                        style: monoStyle(context, size: 12, color: c.ink),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Divider(color: c.rule, height: 1),
+              Flexible(
+                child: _WorkspacePickerSheet(
+                  workspaces: _workspaces,
+                  selected: allowed,
+                  onChange: (next) => selection
+                    ..clear()
+                    ..addAll(next),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    final ordered = _workspaces
+        .where((w) => picked.contains(w['workspace_id']))
+        .map(
+          (w) => {'connection_id': 'local', 'workspace_id': w['workspace_id']},
+        )
+        .toList();
+    if (ordered.isEmpty) {
+      _toast('Keep at least one workspace selected');
+      return;
+    }
+    try {
+      await bridge.call('bridge.assistant.configure_chat', {
+        'cli': _config['cli'] ?? 'omp',
+        'provider': _config['provider'] ?? '',
+        'model': _config['model'] ?? '',
+        'thinking_level': _config['thinking_level'],
+        'allowed_workspaces': ordered,
+      });
+      await _load();
+    } catch (e) {
+      if (mounted) _toast('Could not save: $e');
+    }
+  }
+
+  Future<void> _attach() async {
+    final file = await FilePicker.pickFile(type: FileType.any);
+    if (file == null) return;
+    setState(() => _uploading = true);
+    try {
+      final bytes = await file.readAsBytes();
+      final staged = await bridge.upload(file.name, bytes);
+      if (!mounted) return;
+      setState(() => _staged.add(staged));
+    } catch (e) {
+      if (mounted) _toast('Could not attach: $e');
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+    }
+  }
+
+  Future<void> _stop() async {
+    if (_sessionId == null) return;
+    try {
+      await bridge.call('bridge.assistant.stop', {'session_id': _sessionId});
+    } catch (e) {
+      if (mounted) _toast('Could not stop: $e');
+    }
+  }
+
+  void _toggleSearch() {
+    setState(() {
+      _searching = !_searching;
+      if (!_searching) _search.clear();
+    });
+    if (_searching) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _searchFocus.requestFocus(),
+      );
+    }
+  }
+
+  List<int> _matchingMessages(String query) {
+    final out = <int>[];
+    for (var i = 0; i < _messages.length; i++) {
+      if (_messages[i].text.toLowerCase().contains(query)) out.add(i);
+    }
+    return out;
+  }
+
+  void _stepMatch(int delta) {
+    final query = _search.text.trim().toLowerCase();
+    final hits = _matchingMessages(query);
+    if (hits.isEmpty) return;
+    setState(
+      () => _searchIndex = (_searchIndex + delta + hits.length) % hits.length,
+    );
+    _scrollToMatch(hits[_searchIndex], hits.length);
+  }
+
+  void _scrollToMatch(int item, int total, {int attempt = 0}) {
+    final key = _matchKeys.putIfAbsent(item, GlobalKey.new);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = key.currentContext;
+      if (ctx != null) {
+        Scrollable.ensureVisible(
+          ctx,
+          alignment: 0.12,
+          duration: const Duration(milliseconds: 160),
+        );
+        return;
+      }
+      if (attempt >= 2 || !_scroll.hasClients) return;
+      final position = _scroll.position;
+      final target = total == 1
+          ? position.maxScrollExtent
+          : position.maxScrollExtent * item / (total - 1);
+      _scroll.jumpTo(target.clamp(0.0, position.maxScrollExtent));
+      _scrollToMatch(item, total, attempt: attempt + 1);
+    });
+  }
+
+  void _toast(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message, style: monoStyle(context, size: 12))),
+    );
+  }
+
   Future<void> _pickModel() async {
     final c = context.colors;
+    // hoisted out of the sheet builder: keyboard open/close rebuilds the
+    // sheet, and a fresh notifier would silently reset the active filter
+    final query = ValueNotifier('');
     final selected = await showModalBottomSheet<ScoutModel>(
       context: context,
       backgroundColor: c.paper,
@@ -131,7 +354,6 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
         borderRadius: BorderRadius.vertical(top: Radius.circular(Radii.card)),
       ),
       builder: (sheet) {
-        final query = ValueNotifier('');
         return SafeArea(
           child: SizedBox(
             height: MediaQuery.sizeOf(sheet).height * 0.7,
@@ -236,6 +458,7 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
         );
       },
     );
+    query.dispose();
     if (selected == null) return;
     if (selected.cli == 'openai' && selected.id.isEmpty) {
       await _customEndpoint();
@@ -318,6 +541,7 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
         ],
       ),
     );
+
     if (saved != true || !mounted) return;
     final url = baseUrl.text.trim();
     final id = model.text.trim();
@@ -351,8 +575,48 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
     }
   }
 
+  Future<void> _confirmDeleteSession(Map<String, dynamic> session) async {
+    final c = context.colors;
+    final title = (session['title'] as String?) ?? 'Chat';
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        backgroundColor: c.paper,
+        title: Text('Delete chat?', style: nameStyle(context, size: 16)),
+        content: Text(
+          '"$title" and its messages will be removed. This cannot be undone.',
+          style: monoStyle(context, size: 12, color: c.ink),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialog).pop(false),
+            child: Text('Cancel', style: monoStyle(context, size: 12)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialog).pop(true),
+            child: Text(
+              'Delete',
+              style: monoStyle(context, size: 12, color: c.error),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await bridge.call('bridge.assistant.delete_session', {
+        'session_id': session['id'],
+      });
+      await _load();
+    } catch (e) {
+      if (mounted) _toast('Could not delete: $e');
+    }
+  }
+
   Future<void> _send() async {
-    final text = _input.text.trim();
+    final typed = _input.text.trim();
+    final paths = _staged.map((s) => s.path).join(' ');
+    final text = [typed, paths].where((s) => s.isNotEmpty).join(' ');
     if (text.isEmpty || _sending) return;
     final provider = (_config['provider'] as String?) ?? '';
     final model = (_config['model'] as String?) ?? '';
@@ -386,6 +650,7 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
         if (_sessionId != null) 'session_id': _sessionId,
       });
       _input.clear();
+      _staged.clear();
       await _load();
     } catch (e) {
       if (!mounted) return;
@@ -406,18 +671,37 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
     final provider = (_config['provider'] as String?) ?? '';
     return DrovesScaffold(
       title: 'Scout',
-      subtitle: LedgerLabel(
-        model.isEmpty
-            ? 'no model selected'
-            : '${_config['cli'] ?? 'omp'} $provider/$model',
-      ),
-      leading: IconButton(
-        icon: const Icon(Icons.arrow_back, size: 20),
-        color: c.ink,
-        tooltip: 'Back',
-        onPressed: () => Navigator.of(context).maybePop(),
+      subtitle: Row(
+        children: [
+          Flexible(
+            child: LedgerLabel(
+              model.isEmpty
+                  ? 'no model selected'
+                  : '${_config['cli'] ?? 'omp'} $provider/$model',
+            ),
+          ),
+          if (_running || _sending) ...[
+            const SizedBox(width: Space.xs),
+            LedgerLabel('answering', color: c.error),
+          ],
+        ],
       ),
       actions: [
+        IconButton(
+          icon: Icon(
+            Icons.search,
+            size: 20,
+            color: _searching ? c.accent : c.ink,
+          ),
+          tooltip: _searching ? 'Close search' : 'Search conversation',
+          onPressed: _toggleSearch,
+        ),
+        IconButton(
+          icon: const Icon(Icons.folder_open, size: 20),
+          color: c.ink,
+          tooltip: 'Allowed workspaces',
+          onPressed: _pickWorkspaces,
+        ),
         IconButton(
           icon: const Icon(Icons.tune, size: 20),
           color: c.ink,
@@ -436,6 +720,7 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
       ],
       child: Column(
         children: [
+          if (_searching) _searchBar(context),
           if (_sessions.length > 1)
             SizedBox(
               height: 40,
@@ -448,29 +733,33 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
                   final s = _sessions[i];
                   final active = s['id'] == _sessionId;
                   return Center(
-                    child: InkWell(
-                      onTap: () async {
-                        await bridge.call('bridge.assistant.select_session', {
-                          'session_id': s['id'],
-                        });
-                        await _load();
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: Space.md,
-                          vertical: 5,
-                        ),
-                        decoration: BoxDecoration(
-                          color: active ? c.ink : Colors.transparent,
-                          border: Border.all(color: active ? c.ink : c.rule),
-                          borderRadius: BorderRadius.circular(Radii.row),
-                        ),
-                        child: Text(
-                          (s['title'] as String?) ?? 'Chat',
-                          style: monoStyle(
-                            context,
-                            size: 10.5,
-                            color: active ? c.paper : c.ink,
+                    child: Tooltip(
+                      message: 'Long press to delete chat',
+                      child: InkWell(
+                        onTap: () async {
+                          await bridge.call('bridge.assistant.select_session', {
+                            'session_id': s['id'],
+                          });
+                          await _load();
+                        },
+                        onLongPress: () => _confirmDeleteSession(s),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: Space.md,
+                            vertical: 5,
+                          ),
+                          decoration: BoxDecoration(
+                            color: active ? c.ink : Colors.transparent,
+                            border: Border.all(color: active ? c.ink : c.rule),
+                            borderRadius: BorderRadius.circular(Radii.row),
+                          ),
+                          child: Text(
+                            (s['title'] as String?) ?? 'Chat',
+                            style: monoStyle(
+                              context,
+                              size: 10.5,
+                              color: active ? c.paper : c.ink,
+                            ),
                           ),
                         ),
                       ),
@@ -481,6 +770,66 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
             ),
           Expanded(child: _buildBody(context)),
           _composer(context),
+        ],
+      ),
+    );
+  }
+
+  Widget _searchBar(BuildContext context) {
+    final c = context.colors;
+    final query = _search.text.trim().toLowerCase();
+    final hits = query.isEmpty ? <int>[] : _matchingMessages(query);
+    return Container(
+      decoration: BoxDecoration(
+        color: c.paper,
+        border: Border(bottom: BorderSide(color: c.rule)),
+      ),
+      padding: const EdgeInsets.fromLTRB(
+        Space.sm,
+        Space.xs,
+        Space.sm,
+        Space.xs,
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.search, size: 18, color: c.muted),
+          const SizedBox(width: Space.xs),
+          Expanded(
+            child: TextField(
+              controller: _search,
+              focusNode: _searchFocus,
+              onChanged: (_) => setState(() => _searchIndex = 0),
+              style: monoStyle(context, size: 12),
+              decoration: InputDecoration(
+                hintText: 'Search conversation',
+                hintStyle: monoStyle(context, size: 12, color: c.muted),
+                border: InputBorder.none,
+                isDense: true,
+              ),
+            ),
+          ),
+          if (query.isNotEmpty)
+            Text(
+              hits.isEmpty ? '0 matches' : '${_searchIndex + 1}/${hits.length}',
+              style: monoStyle(context, size: 10, color: c.muted),
+            ),
+          if (hits.isNotEmpty)
+            IconButton(
+              icon: Icon(Icons.keyboard_arrow_up, size: 18, color: c.muted),
+              tooltip: 'Previous match',
+              onPressed: () => _stepMatch(-1),
+            ),
+          if (hits.isNotEmpty)
+            IconButton(
+              icon: Icon(Icons.keyboard_arrow_down, size: 18, color: c.muted),
+              tooltip: 'Next match',
+              onPressed: () => _stepMatch(1),
+            ),
+          IconButton(
+            icon: Icon(Icons.close, size: 18, color: c.muted),
+            tooltip: 'Close search',
+            onPressed: _toggleSearch,
+          ),
         ],
       ),
     );
@@ -524,6 +873,7 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
         final m = _messages[i];
         final user = m.role == 'user';
         return Column(
+          key: _matchKeys.putIfAbsent(i, GlobalKey.new),
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             LedgerLabel(
@@ -552,62 +902,171 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
 
   Widget _composer(BuildContext context) {
     final c = context.colors;
+    final running = _running || _sending;
     return Container(
       decoration: BoxDecoration(
         color: c.paper,
         border: Border(top: BorderSide(color: c.rule)),
       ),
-      padding: const EdgeInsets.fromLTRB(Space.sm, Space.sm, Space.sm, 0),
+      padding: const EdgeInsets.fromLTRB(
+        Space.sm,
+        Space.sm,
+        Space.sm,
+        Space.sm,
+      ),
       child: SafeArea(
         top: false,
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            if (_running)
+            if (_staged.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.only(right: Space.sm, bottom: 12),
-                child: LedgerLabel('answering', color: c.accent),
-              ),
-            Expanded(
-              child: TextField(
-                controller: _input,
-                minLines: 1,
-                maxLines: 5,
-                style: monoStyle(context, size: 13),
-                decoration: InputDecoration(
-                  hintText: 'Ask Scout',
-                  hintStyle: monoStyle(
-                    context,
-                    size: 12,
-                    color: c.muted.withValues(alpha: 0.8),
-                  ),
-                  border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: Space.sm,
-                    vertical: 12,
+                padding: const EdgeInsets.only(bottom: Space.xs),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Wrap(
+                    spacing: Space.xs,
+                    runSpacing: Space.xs,
+                    children: [
+                      for (var i = 0; i < _staged.length; i++)
+                        StagedChip(
+                          name: _staged[i].name,
+                          onRemove: () => setState(() => _staged.removeAt(i)),
+                        ),
+                    ],
                   ),
                 ),
               ),
-            ),
-            SizedBox(
-              width: 44,
-              height: 44,
-              child: IconButton.filled(
-                onPressed: _sending ? null : _send,
-                style: IconButton.styleFrom(
-                  backgroundColor: c.ink,
-                  foregroundColor: c.paper,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(Radii.row),
+            Row(
+              crossAxisAlignment: _multiline
+                  ? CrossAxisAlignment.end
+                  : CrossAxisAlignment.center,
+              children: [
+                IconButton(
+                  onPressed: _uploading ? null : _attach,
+                  color: c.muted,
+                  tooltip: 'Attach a file',
+                  icon: _uploading
+                      ? SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 1.6,
+                            color: c.muted,
+                          ),
+                        )
+                      : const Icon(Icons.attach_file, size: 20),
+                ),
+                Expanded(
+                  child: TextField(
+                    controller: _input,
+                    textAlignVertical: TextAlignVertical.center,
+                    minLines: 1,
+                    maxLines: 5,
+                    style: monoStyle(context, size: 13),
+                    decoration: InputDecoration(
+                      hintText: 'Ask Scout',
+                      hintStyle: monoStyle(
+                        context,
+                        size: 12,
+                        color: c.muted.withValues(alpha: 0.8),
+                      ),
+                      border: InputBorder.none,
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: Space.sm,
+                        vertical: 12,
+                      ),
+                    ),
                   ),
                 ),
-                tooltip: 'Send',
-                icon: const Icon(Icons.arrow_upward, size: 18),
-              ),
+                const SizedBox(width: Space.xs),
+                SizedBox(
+                  height: 44,
+                  width: 44,
+                  child: IconButton.filled(
+                    onPressed: running ? _stop : _send,
+                    style: IconButton.styleFrom(
+                      backgroundColor: running ? c.error : c.ink,
+                      foregroundColor: c.paper,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(Radii.row),
+                      ),
+                    ),
+                    tooltip: running ? 'Stop (Esc)' : 'Send',
+                    icon: Icon(
+                      running ? Icons.stop : Icons.arrow_upward,
+                      size: 18,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _WorkspacePickerSheet extends StatefulWidget {
+  const _WorkspacePickerSheet({
+    required this.workspaces,
+    required this.selected,
+    required this.onChange,
+  });
+
+  final List<Map<String, dynamic>> workspaces;
+  final Set<dynamic> selected;
+  final ValueChanged<Set<dynamic>> onChange;
+
+  @override
+  State<_WorkspacePickerSheet> createState() => _WorkspacePickerSheetState();
+}
+
+class _WorkspacePickerSheetState extends State<_WorkspacePickerSheet> {
+  late final Set<dynamic> _selected = {...widget.selected};
+
+  void _toggle(dynamic id) {
+    setState(() {
+      if (!_selected.add(id)) _selected.remove(id);
+      widget.onChange(_selected);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    if (widget.workspaces.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.all(Space.lg),
+        child: Text(
+          'No workspaces available from herdr.',
+          style: monoStyle(context, size: 12, color: c.muted),
+        ),
+      );
+    }
+    return ListView.separated(
+      padding: const EdgeInsets.symmetric(horizontal: Space.md),
+      itemCount: widget.workspaces.length,
+      separatorBuilder: (_, _) => Divider(color: c.rule, height: 1),
+      itemBuilder: (_, i) {
+        final w = widget.workspaces[i];
+        final id = w['workspace_id'];
+        final label = (w['label'] as String?) ?? (id as String? ?? '?');
+        final root = (w['cwd'] as String?) ?? '';
+        return CheckboxListTile(
+          dense: true,
+          value: _selected.contains(id),
+          activeColor: c.ink,
+          onChanged: (_) => _toggle(id),
+          title: Text(label, style: monoStyle(context, size: 12.5)),
+          subtitle: Text(
+            root,
+            style: monoStyle(context, size: 10, color: c.muted),
+          ),
+        );
+      },
     );
   }
 }
