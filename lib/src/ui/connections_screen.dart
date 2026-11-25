@@ -1,5 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../bridge/bridge.dart';
+
 import '../model/app_state.dart';
 import '../theme/tokens.dart';
 import 'connect_screen.dart';
@@ -99,10 +101,15 @@ class _ConnectionsScreenState extends State<ConnectionsScreen>
   Widget build(BuildContext context) {
     final c = context.colors;
     final state = AppScope.of(context);
+    final live = app.bridge;
+    final connected = live != null && live.state == BridgeState.ready;
+    final status = connectionSubtitle(context, _error);
     return DrovesScaffold(
       title: 'Machines',
       subtitle: LedgerLabel(
-        _loading
+        status.isNotEmpty
+            ? status
+            : _loading
             ? 'reading connections'
             : '${_connections.length} inside this bridge',
       ),
@@ -132,7 +139,7 @@ class _ConnectionsScreenState extends State<ConnectionsScreen>
               style: monoStyle(context, size: 12),
             ),
             subtitle: Text(
-              'Dial a second machine over your tailnet',
+              'Reach another machine through this bridge',
               style: monoStyle(context, size: 10.5, color: c.muted),
             ),
             onTap: () => Navigator.of(context)
@@ -140,23 +147,23 @@ class _ConnectionsScreenState extends State<ConnectionsScreen>
           ),
           Divider(color: c.rule, height: 1),
           _GroupLabel('Hosts in this bridge'),
-          if (_error != null)
-            Padding(
-              padding: const EdgeInsets.all(Space.md),
-              child: Text(
-                _error!,
-                style: monoStyle(context, size: 11, color: c.accent),
-              ),
-            )
-          else if (_loading)
-            const SkeletonRows(rows: 2, rowHeight: 56)
-          else if (_connections.isEmpty)
-            Padding(
-              padding: const EdgeInsets.all(Space.md),
-              child: Text(
-                'This bridge reports no host. Add one on the machine that runs it.',
-                style: monoStyle(context, size: 11, color: c.muted),
-              ),
+          if (_loading ||
+              _error != null ||
+              !connected ||
+              _connections.isEmpty)
+            ScreenState(
+              loading: _loading,
+              error: _error,
+              connected: connected,
+              empty: _connections.isEmpty,
+              subject: 'hosts',
+              emptyHeadline: 'No hosts inside this bridge',
+              emptyBody:
+                  'Add a host on the machine that runs the bridge, then refresh.',
+              onRetry: connectionRetry(context, _load),
+              rows: 2,
+              rowHeight: 56,
+              emptyIcon: Icons.computer_outlined,
             )
           else
             for (final conn in _connections)

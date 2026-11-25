@@ -5,8 +5,8 @@ import '../model/app_state.dart';
 import '../theme/tokens.dart';
 import 'widgets.dart';
 
-/// first-run setup: only the bridge's tailnet address is required
-/// token may stay empty over Tailscale private HTTPS; login cookie can be pasted later
+/// first-run setup: a reachable bridge URL plus its access token. The provider
+/// decides the address and whether a third party carries the traffic.
 class ConnectScreen extends StatefulWidget {
   const ConnectScreen({super.key});
 
@@ -88,7 +88,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
     final c = context.colors;
     return DrovesScaffold(
       title: 'Connect',
-      subtitle: const LedgerLabel('private network only'),
+      subtitle: const LedgerLabel('bring your own connection'),
       leading: Navigator.of(context).canPop()
           ? IconButton(
               icon: const Icon(Icons.arrow_back, size: 20),
@@ -115,7 +115,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
           const SizedBox(height: Space.sm),
           Text(
             'Droves reads your agents through a small bridge on the machine '
-            'where they run. Nothing goes through a third party.',
+            'where they run. You choose how that bridge is reached.',
             style: monoStyle(context, size: 12, color: c.muted),
           ),
           if (!kIsWeb && AppScope.of(context).endpoints.isNotEmpty) ...[
@@ -154,7 +154,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
             const _Step(
               number: 2,
               title: 'Copy its private address',
-              body: 'In Tailscale, copy the MagicDNS name for that machine.',
+              body: 'Copy the address your tunnel or proxy publishes for that machine.',
             ),
             const _Step(
               number: 3,
@@ -171,7 +171,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
           const SizedBox(height: Space.lg),
           _Field(
             label: 'Bridge address',
-            hint: 'https://your-machine.tailnet.ts.net:13030',
+            hint: 'https://your-bridge.example.com/',
             controller: _url,
             keyboard: kIsWeb ? null : TextInputType.url,
             readOnly: kIsWeb,
@@ -282,10 +282,14 @@ class _ConnectScreenState extends State<ConnectScreen> {
                   Align(
                     alignment: Alignment.centerLeft,
                     child: Text(
-                      'Run these on the machine that runs your agents:\n\n'
-                      'droves-bridge\n'
-                      'tailscale serve --bg 13030\n'
-                      'cat ~/.config/droves-bridge/token',
+                      'Run the bridge on the machine with your agents, then '
+                      'publish its loopback port with any tunnel or reverse '
+                      'proxy:\n\n'
+                      'droves-bridge -addr 127.0.0.1:13030\n'
+                      'cat ~/.config/droves-bridge/token\n\n'
+                      'Paste the published HTTPS address above. A private '
+                      'mesh, Cloudflare Tunnel, Pangolin or your own '
+                      'reverse proxy all work.',
                       style: monoStyle(context, size: 10.5, color: c.muted),
                     ),
                   ),

@@ -1,5 +1,5 @@
 // end-to-end smoke check against a live bridge. run:
-//   BRIDGE_URL=https://host.tailnet.ts.net BRIDGE_TOKEN=… dart run tool/smoke.dart
+//   BRIDGE_URL=https://bridge.example.com/ BRIDGE_TOKEN=… dart run tool/smoke.dart
 import 'dart:io';
 
 import 'package:droves/src/bridge/bridge.dart';

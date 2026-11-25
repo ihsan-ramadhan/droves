@@ -204,6 +204,141 @@ class StateMessage extends StatelessWidget {
   }
 }
 
+/// a tab's subtitle says why it is quiet before the body has to
+String connectionSubtitle(BuildContext context, String? error) {
+  final live = AppScope.of(context).bridge;
+  if (live == null) return 'no bridge connected';
+  return switch (live.state) {
+    BridgeState.ready => '',
+    BridgeState.connecting => 'connecting to bridge',
+    BridgeState.failed =>
+      'connection failed · ${error ?? live.lastError ?? ''}',
+    BridgeState.idle => 'bridge disconnected · waiting to reconnect',
+  };
+}
+
+/// disconnected bodies offer a real redial, not a load that returns early
+VoidCallback connectionRetry(BuildContext context, VoidCallback fallback) {
+  final app = AppScope.maybeOf(context);
+  if (app == null) return fallback;
+  return () => app.reconnect().catchError((_) {}).whenComplete(fallback);
+}
+
+/// one place decides what a screen says when it has no usable data:
+/// a disconnected bridge outranks a stale error, and a load outranks empty.
+/// The label is literal so every tab reads the same when the bridge drops.
+class ScreenState extends StatelessWidget {
+  const ScreenState({
+    super.key,
+    required this.loading,
+    required this.error,
+    required this.connected,
+    required this.empty,
+    required this.subject,
+    required this.emptyHeadline,
+    required this.emptyBody,
+    required this.onRetry,
+    this.loadingBody = 'Reading from the bridge',
+    this.rows = 5,
+    this.rowHeight = 64,
+    this.emptyIcon,
+    this.emptyAction,
+  });
+
+  final bool loading;
+  final String? error;
+  final bool connected;
+  final bool empty;
+  final String subject;
+  final String emptyHeadline;
+  final String emptyBody;
+  final VoidCallback onRetry;
+  final String loadingBody;
+  final int rows;
+  final double rowHeight;
+  final IconData? emptyIcon;
+  final Widget? emptyAction;
+
+  @override
+  Widget build(BuildContext context) {
+    // a screen that starts out loading must not promise progress while the
+    // socket is down; only a dial in flight counts as work
+    final connecting =
+        AppScope.maybeOf(context)?.state == BridgeState.connecting;
+    if (loading && (connected || connecting)) {
+      return Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              Space.lg,
+              Space.md,
+              Space.lg,
+              Space.xs,
+            ),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 12,
+                  height: 12,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 1.6,
+                    color: context.colors.muted,
+                  ),
+                ),
+                const SizedBox(width: Space.sm),
+                Expanded(
+                  child: Text(
+                    '$loadingBody $subject',
+                    style: monoStyle(
+                      context,
+                      size: 11,
+                      color: context.colors.muted,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          SkeletonRows(rows: rows, rowHeight: rowHeight),
+        ],
+      );
+    }
+    if (!connected) {
+      return StateMessage(
+        headline: 'Bridge is not connected',
+        body:
+            'This screen will update once Droves reconnects. Check the '
+            'bridge address or open the Connect screen to switch machines.',
+        icon: Icons.cable_outlined,
+        action: OutlinedButton(
+          onPressed: onRetry,
+          child: Text('Try again', style: monoStyle(context, size: 12)),
+        ),
+      );
+    }
+    if (error != null) {
+      return StateMessage(
+        headline: 'Could not read $subject',
+        body: error!,
+        icon: Icons.error_outline,
+        action: OutlinedButton(
+          onPressed: onRetry,
+          child: Text('Try again', style: monoStyle(context, size: 12)),
+        ),
+      );
+    }
+    if (empty) {
+      return StateMessage(
+        headline: emptyHeadline,
+        body: emptyBody,
+        icon: emptyIcon,
+        action: emptyAction,
+      );
+    }
+    return const SizedBox.shrink();
+  }
+}
+
 /// spins only while the owning screen reports a fetch in flight
 class RefreshButton extends StatefulWidget {
   const RefreshButton({

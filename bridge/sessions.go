@@ -72,6 +72,14 @@ func (t *Transcripts) sessionPath(ctx context.Context, s *Server, p map[string]a
 			return path, name, nil
 		}
 	}
+	// jcode's herdr hook reports no session ref, so derive it from the cwd
+	if name == "jcode" && ref.Value == "" {
+		cwd := firstNonEmpty(agent.ForegroundCwd, agent.Cwd)
+		if path := recentJcodeSession(cwd); path != "" {
+			return path, name, nil
+		}
+		return "", name, errors.New("no jcode session found for this workspace")
+	}
 	// fallback: treat the value as a path (older herdr without kind)
 	path := ref.Value
 	if path == "" {
@@ -170,6 +178,9 @@ func parseTranscript(path, agent string) (*transcriptFile, error) {
 		// codex needs a pre-scan for event_msg/response_item dedup;
 		// handled by a dedicated two-pass parser
 		return parseCodexTranscript(f, out)
+	}
+	if name == "jcode" {
+		return parseJcodeTranscript(f, out)
 	}
 	parse := recordParserFor(name)
 	sc := bufio.NewScanner(f)

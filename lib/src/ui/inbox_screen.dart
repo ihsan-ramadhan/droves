@@ -109,13 +109,16 @@ class _InboxScreenState extends State<InboxScreen> with BridgeAccess {
 
     final waiting = _workspaces.where((w) => w.agentStatus == 'blocked').length;
     final working = _workspaces.where((w) => w.agentStatus == 'working').length;
+    final status = connectionSubtitle(context, _error);
+    final connectionLabel = status.isEmpty ? null : status;
 
     return DrovesScaffold(
       title: 'Inbox',
       subtitle: LedgerLabel(
-        _loading
-            ? 'reading machines'
-            : '${_workspaces.length} spaces · $working working · $waiting waiting',
+        connectionLabel ??
+            (_loading
+                ? 'reading machines'
+                : '${_workspaces.length} spaces · $working working · $waiting waiting'),
       ),
       actions: [RefreshButton(busy: _loading, onPressed: () => _load())],
       child: RefreshIndicator(
@@ -128,34 +131,25 @@ class _InboxScreenState extends State<InboxScreen> with BridgeAccess {
 
   Widget _buildBody(BuildContext context) {
     final c = context.colors;
-    if (_loading && _workspaces.isEmpty) {
-      return const SkeletonRows(rows: 6);
-    }
-    if (_error != null) {
-      return ListView(
-        children: [
-          StateMessage(
-            headline: 'Bridge did not answer',
-            body: _error!,
-            icon: Icons.error_outline,
-            action: OutlinedButton(
-              onPressed: () => _load(),
-              child: Text('Try again', style: monoStyle(context, size: 12)),
-            ),
-          ),
-        ],
-      );
-    }
-    if (_workspaces.isEmpty) {
-      return ListView(
-        children: const [
-          StateMessage(
-            headline: 'No workspaces open',
-            body: 'Start a pane on the machine, then pull to refresh.',
-            icon: Icons.inbox_outlined,
-          ),
-        ],
-      );
+    final live = app.bridge;
+    final connected = live != null && live.state == BridgeState.ready;
+    final state = ScreenState(
+      loading: _loading && _workspaces.isEmpty,
+      error: _error,
+      connected: connected,
+      empty: _workspaces.isEmpty,
+      subject: 'workspaces',
+      emptyHeadline: 'No workspaces open',
+      emptyBody: 'Start a pane on the machine, then pull to refresh.',
+      onRetry: connectionRetry(context, () => _load()),
+      rows: 6,
+      emptyIcon: Icons.inbox_outlined,
+    );
+    if (_loading && _workspaces.isEmpty ||
+        !connected ||
+        _error != null ||
+        _workspaces.isEmpty) {
+      return ListView(children: [state]);
     }
     return ListView.separated(
       itemCount: _workspaces.length,

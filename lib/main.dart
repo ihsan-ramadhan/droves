@@ -489,9 +489,18 @@ class _ChangesGateState extends State<_ChangesGate> {
   }
 
   Future<void> _reload() async {
-    final bridge = AppScope.of(context).bridge;
-    if (bridge == null) return;
-    final next = bridge.workspaces();
+    final app = AppScope.of(context);
+    final bridge = app.bridge;
+    if (bridge == null || bridge.state != BridgeState.ready) {
+      await app.reconnect().catchError((_) {});
+      if (!mounted) return;
+    }
+    final live = AppScope.of(context).bridge;
+    if (live == null || live.state != BridgeState.ready) {
+      setState(() => _future = null);
+      return;
+    }
+    final next = live.workspaces();
     setState(() {
       _future = next;
       _reloading = true;
@@ -510,29 +519,35 @@ class _ChangesGateState extends State<_ChangesGate> {
     if (future == null) {
       return DrovesScaffold(
         title: 'Changes',
-        child: StateMessage(
-          headline: 'Not connected',
-          body: 'Connect a bridge to read changes.',
-          icon: Icons.account_tree_outlined,
+        subtitle: const LedgerLabel('no bridge connected'),
+        child: ScreenState(
+          loading: false,
+          error: null,
+          connected: false,
+          empty: false,
+          subject: 'changes',
+          emptyHeadline: '',
+          emptyBody: '',
+          onRetry: _reload,
         ),
       );
     }
     return FutureBuilder<List<WorkspaceInfo>>(
       future: future,
       builder: (context, snap) {
-        if (snap.connectionState != ConnectionState.done) {
-          return const DrovesScaffold(
-            title: 'Changes',
-            child: SkeletonRows(rows: 6),
-          );
-        }
-        if (snap.hasError) {
+        if (snap.connectionState != ConnectionState.done || snap.hasError) {
           return DrovesScaffold(
             title: 'Changes',
-            child: StateMessage(
-              headline: 'Could not list workspaces',
-              body: snap.error.toString(),
-              icon: Icons.error_outline,
+            child: ScreenState(
+              loading: snap.connectionState != ConnectionState.done,
+              error: snap.hasError ? snap.error.toString() : null,
+              connected: true,
+              empty: false,
+              subject: 'workspaces',
+              emptyHeadline: '',
+              emptyBody: '',
+              onRetry: _reload,
+              rows: 6,
             ),
           );
         }
@@ -540,10 +555,16 @@ class _ChangesGateState extends State<_ChangesGate> {
         if (list.isEmpty) {
           return DrovesScaffold(
             title: 'Changes',
-            child: StateMessage(
-              headline: 'No workspaces',
-              body: 'Open a workspace on the machine first.',
-              icon: Icons.inbox_outlined,
+            child: ScreenState(
+              loading: false,
+              error: null,
+              connected: true,
+              empty: true,
+              subject: 'changes',
+              emptyHeadline: 'No workspaces',
+              emptyBody: 'Open a workspace on the machine first.',
+              onRetry: _reload,
+              emptyIcon: Icons.inbox_outlined,
             ),
           );
         }

@@ -6,8 +6,6 @@ import (
 	"errors"
 	"log"
 	"net/http"
-	"net/url"
-	"strings"
 	"sync"
 	"time"
 
@@ -53,12 +51,9 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	if origin := r.Header.Get("Origin"); origin != "" {
-		u, err := url.Parse(origin)
-		if err != nil || !strings.EqualFold(u.Host, r.Host) {
-			http.Error(w, "origin mismatch", http.StatusForbidden)
-			return
-		}
+	if !s.ingress.AllowsOrigin(r, r.Header.Get("Origin")) {
+		http.Error(w, "origin mismatch", http.StatusForbidden)
+		return
 	}
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		InsecureSkipVerify: true,

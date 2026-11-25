@@ -57,12 +57,16 @@ func (s *Server) dispatch(ctx context.Context, c *Client, req RPCRequest) (any, 
 	case "bridge.ping":
 		return map[string]any{"ok": true, "version": s.version}, nil
 	case "bridge.status":
+		exp := s.exposeStatus(ctx)
 		return map[string]any{
 			"state":        "ready",
 			"version":      s.version,
 			"clients":      s.countClients(),
 			"herdr_socket": s.cfg.Socket,
+			"exposure":     exp,
 		}, nil
+	case "bridge.info":
+		return s.info(ctx), nil
 	case "connections.list":
 		return map[string]any{"connections": []any{map[string]any{
 			"id":                  "local",

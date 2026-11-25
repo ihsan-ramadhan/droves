@@ -1,5 +1,6 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../bridge/bridge.dart';
 import '../theme/tokens.dart';
 import 'files_screen.dart';
 import 'widgets.dart';
@@ -100,9 +101,10 @@ class _SearchScreenState extends State<SearchScreen> with BridgeAccess {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
+    final status = connectionSubtitle(context, _error);
     return DrovesScaffold(
       title: 'Search',
-      subtitle: LedgerLabel(widget.label),
+      subtitle: LedgerLabel(status.isNotEmpty ? status : widget.label),
       leading: IconButton(
         icon: const Icon(Icons.arrow_back, size: 20),
         color: c.ink,
@@ -153,34 +155,38 @@ class _SearchScreenState extends State<SearchScreen> with BridgeAccess {
 
   Widget _buildResults(BuildContext context) {
     final c = context.colors;
+    final live = app.bridge;
+    final connected = live != null && live.state == BridgeState.ready;
     if (_searching) {
-      return Center(
-        child: Text(
-          'Searching',
-          style: monoStyle(context, size: 12, color: c.muted),
-        ),
+      return ScreenState(
+        loading: true,
+        error: null,
+        connected: true,
+        empty: false,
+        subject: 'workspace',
+        emptyHeadline: '',
+        emptyBody: '',
+        onRetry: () {},
+        loadingBody: 'Searching',
+        rows: 3,
+        rowHeight: 44,
       );
     }
-    if (_error != null) {
-      return StateMessage(
-        headline: 'Search failed',
-        body: _error!,
-        icon: Icons.error_outline,
-      );
-    }
-    if (!_ran) {
-      return const StateMessage(
-        headline: 'Search this workspace',
-        body: 'File names first, then matching lines inside files.',
-        icon: Icons.search,
-      );
-    }
-    if (_nameHits.isEmpty && _contentHits.isEmpty) {
-      return StateMessage(
-        headline: 'No matches',
-        body: 'Nothing in ${widget.label} matches “${_query.text.trim()}”.',
-        icon: Icons.search_off,
-      );
+    final state = ScreenState(
+      loading: false,
+      error: _error,
+      connected: connected,
+      empty: !_ran || _nameHits.isEmpty && _contentHits.isEmpty,
+      subject: 'search',
+      emptyHeadline: _ran ? 'No matches' : 'Search this workspace',
+      emptyBody: _ran
+          ? 'Nothing in ${widget.label} matches “${_query.text.trim()}”.'
+          : 'File names first, then matching lines inside files.',
+      onRetry: connectionRetry(context, () => _search(_query.text)),
+      emptyIcon: _ran ? Icons.search_off : Icons.search,
+    );
+    if (!connected || _error != null || !_ran || _nameHits.isEmpty && _contentHits.isEmpty) {
+      return state;
     }
     return ListView(
       children: [

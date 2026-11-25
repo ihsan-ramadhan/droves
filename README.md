@@ -15,7 +15,8 @@ Native Android, iOS and web client for a self-hosted herdr bridge.
 
 Droves shows the workspaces, panes, agents, terminals, Git changes and files that
 already exist on your machine. It has no agent runtime of its own: every action
-goes through a bridge over a private network such as Tailscale.
+goes through a bridge that you publish over a private mesh, a tunnel or a
+reverse proxy of your choice.
 
 The machine side is [herdr](https://github.com/herdrdev/herdr). The bridge in
 `bridge/` fronts herdr's control socket, reads agent session files, and serves
@@ -49,13 +50,27 @@ Windows:
 irm https://github.com/ihsan-ramadhan/droves/releases/latest/download/install.ps1 | iex
 ```
 
-Then serve the bridge on loopback and expose it through Tailscale:
+Then run the bridge on loopback and publish that port:
 
 ```sh
 droves-bridge -addr 127.0.0.1:13030 -web ~/.local/share/droves/web
-tailscale serve --bg 13030
 cat ~/.config/droves-bridge/token
+
+# pick one provider (or configure your own reverse proxy):
+droves-bridge expose -provider tailscale          # tailnet only
+droves-bridge expose -provider tailscale-funnel   # public, see caveats below
+droves-bridge expose token -provider cloudflared <TOKEN>
+droves-bridge expose                              # show what is published
 ```
+
+Provider details live in [Reachability](docs/reachability.md). `tailscale`
+needs the `tailscale` CLI on the host. `cloudflared` needs the CLI
+plus a remotely-managed tunnel token from Cloudflare, stored with mode `0600`
+in the bridge state dir. Without a provider the bridge listens on loopback
+only; anything that can forward HTTP to that port works, including Pangolin,
+Netbird, an SSH reverse tunnel or your own reverse proxy. If the proxy serves
+the app under a subpath, pass `-public-url https://host/subpath` so the client
+resolves its API calls under the same prefix.
 
 Get the client:
 
@@ -66,8 +81,10 @@ Get the client:
   with SideStore, or use the web build.
 - **Web**: open `https://<bridge-host>/droves/`.
 
-Enter the bridge URL and token in the app. For Tailscale, use
-`https://machine.tailnet.ts.net:13030`.
+Enter the published URL and token in the app, for example
+`https://droves.example.com/`. `droves-bridge expose` prints the address when
+the provider reports one. The web build must be opened from the bridge origin,
+because the session cookie never leaves that site.
 
 ## Bridge CLI
 
@@ -82,6 +99,10 @@ Enter the bridge URL and token in the app. For Tailscale, use
 | `update -check` | report the newest release |
 | `update` | download, verify SHA256, install and restart |
 | `update -apply` | apply a binary staged because the running one was locked |
+| `expose`, `expose status` | report the publishing provider and its URL |
+| `expose -provider tailscale` | publish through the tailnet |
+| `expose -provider cloudflared token <TOKEN>` | store a Cloudflare Tunnel token |
+| `expose off` | remove this bridge's published route |
 | `version` / `-version` | print version (`-version` is the installer alias) |
 | `help` | list all commands and flags |
 
@@ -99,12 +120,16 @@ release.
 
 | Setting | Where | Notes |
 | --- | --- | --- |
-| Bridge URL | Connect screen | Scheme required; use the tailnet host |
+| Bridge URL | Connect screen | The address your tunnel or proxy publishes, with a path if mounted under one |
 | Access token | Connect screen | Exchanged for a session cookie, stored locally |
 | Theme | Settings | Light, dark, follow system |
 | Notifications | Settings | Completed, blocked and Scout activity; taps open the pane |
 | Battery optimization | Settings (Android only) | Request exemption so agent alerts are not delayed |
 | Autostart | `droves-bridge autostart` | Login/boot start for the bridge |
+| `-public-url` / `DROVES_PUBLIC_URL` | Bridge flag | Address clients dial; its path sets the mount prefix |
+| `-base-path` / `DROVES_BASE_PATH` | Bridge flag | Serve under a subpath when the proxy does not rewrite it |
+| `-trusted-proxies` / `DROVES_TRUSTED_PROXIES` | Bridge flag | CIDRs whose `X-Forwarded-*` headers are honoured |
+| `-expose` / `DROVES_EXPOSE` | Bridge flag | Provider at startup: `none`, `tailscale`, `tailscale-funnel`, `cloudflared` |
 | `DROVES_NO_UPDATE_CHECK=1` | Environment | Disable background bridge updates |
 | `DROVES_RELEASES_URL` | Environment | Override release download base URL |
 
@@ -129,11 +154,15 @@ update appears. iOS notifications are not wired yet.
 
 ## Security
 
-The bridge is the security boundary. Use a tailnet or another private network,
-keep the token secret, and serve web from the bridge origin so the session cookie
-works. The token is sent once to `/api/login`; after that the client uses the
-returned cookie. Terminal input, file writes and Git actions go through bridge
-RPCs. Nothing executes locally on the phone.
+The bridge is the security boundary. Prefer a private mesh or an identity-gated
+proxy; a public tunnel without an access policy leaves only the bridge token
+between the internet and terminal input, file writes and Git actions. Keep the
+token secret and serve web from the bridge origin so the session cookie works.
+The token is sent once to `/api/login`; after that the client uses the returned
+cookie. A proxy that terminates TLS should set `X-Forwarded-Proto`, and only
+proxies listed in `-trusted-proxies` (default loopback) may set forwarded
+headers. Terminal input, file writes and Git actions go through bridge RPCs.
+Nothing executes locally on the phone.
 
 ## Development
 

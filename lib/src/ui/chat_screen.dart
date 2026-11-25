@@ -455,26 +455,23 @@ class _ChatScreenState extends State<ChatScreen> with BridgeAccess {
   }
 
   Widget _buildBody(BuildContext context) {
-    if (_loading) {
-      return const SkeletonRows(rows: 4, rowHeight: 92);
-    }
-    if (_error != null) {
-      return StateMessage(
-        headline: 'Transcript unavailable',
-        body: _error!,
-        icon: Icons.error_outline,
-        action: OutlinedButton(
-          onPressed: () => _load(),
-          child: Text('Try again', style: monoStyle(context, size: 12)),
-        ),
-      );
-    }
-    if (_messages.isEmpty) {
-      return StateMessage(
-        headline: 'No messages yet',
-        body: 'Type below to send the agent its first line.',
-        icon: Icons.chat_bubble_outline,
-      );
+    final live = app.bridge;
+    final connected = live != null && live.state == BridgeState.ready;
+    final state = ScreenState(
+      loading: _loading,
+      error: _error,
+      connected: connected,
+      empty: _messages.isEmpty,
+      subject: 'transcript',
+      emptyHeadline: 'No messages yet',
+      emptyBody: 'Type below to send the agent its first line.',
+      onRetry: connectionRetry(context, () => _load()),
+      rows: 4,
+      rowHeight: 92,
+      emptyIcon: Icons.chat_bubble_outline,
+    );
+    if (_loading || !connected || _error != null || _messages.isEmpty) {
+      return state;
     }
     final query = _search.text.trim().toLowerCase();
     final all = query.isEmpty ? _windowBlocks() : _matchingBlocks(query);

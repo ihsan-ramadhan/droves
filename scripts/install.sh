@@ -127,8 +127,10 @@ Next steps
        droves-bridge -addr 127.0.0.1:13030 -web $SHARE_DIR/web
   3. read the access token:
        cat ~/.config/droves-bridge/token
-  4. expose the port on your tailnet only:
-       tailscale serve --bg 13030
+  4. publish the loopback port with your tunnel or reverse proxy, then
+       open https://<your-bridge-host>/droves/ and paste the address and token.
+     Examples: droves-bridge expose -provider tailscale
+               droves-bridge expose token -provider cloudflared <TOKEN>
 
 Update later by running this script again.
 EOF

@@ -258,11 +258,14 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> with BridgeAccess {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
+    final status = connectionSubtitle(context, _error);
     return DrovesScaffold(
       title: widget.workspace.label.isEmpty
           ? widget.workspace.workspaceId
           : widget.workspace.label,
-      subtitle: LedgerLabel('${_paneCount()} · ${_status()}'),
+      subtitle: LedgerLabel(
+        status.isNotEmpty ? status : '${_paneCount()} · ${_status()}',
+      ),
       leading: IconButton(
         icon: const Icon(Icons.arrow_back, size: 20),
         color: c.ink,
@@ -302,26 +305,23 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> with BridgeAccess {
 
   Widget _buildBody(BuildContext context) {
     final c = context.colors;
-    if (_loading) {
-      return const SkeletonRows(rows: 3, rowHeight: 120);
-    }
-    if (_error != null) {
-      return StateMessage(
-        headline: 'Could not read this workspace',
-        body: _error!,
-        icon: Icons.error_outline,
-        action: OutlinedButton(
-          onPressed: _load,
-          child: Text('Try again', style: monoStyle(context, size: 12)),
-        ),
-      );
-    }
-    if (_panes.isEmpty) {
-      return const StateMessage(
-        headline: 'No panes in this workspace',
-        body: 'Create a tab or pane on the machine, then refresh.',
-        icon: Icons.terminal,
-      );
+    final live = app.bridge;
+    final connected = live != null && live.state == BridgeState.ready;
+    final state = ScreenState(
+      loading: _loading,
+      error: _error,
+      connected: connected,
+      empty: _panes.isEmpty,
+      subject: 'workspace',
+      emptyHeadline: 'No panes in this workspace',
+      emptyBody: 'Create a tab or pane on the machine, then refresh.',
+      onRetry: connectionRetry(context, _load),
+      rows: 3,
+      rowHeight: 120,
+      emptyIcon: Icons.terminal,
+    );
+    if (_loading || !connected || _error != null || _panes.isEmpty) {
+      return state;
     }
     return Column(
       children: [

@@ -181,10 +181,10 @@ class Bridge {
     if (!_state.isClosed) _state.add(s);
   }
 
-  /// `/api/login` only answers non-loopback clients; a tailnet host is required
+  /// exchange the token once; the cookie scopes later calls to the bridge path
   Future<void> login(String password) async {
     final res = await http.post(
-      baseUrl.replace(path: '/api/login'),
+      baseUrl.resolve('api/login'),
       headers: {'content-type': 'application/json'},
       body: jsonEncode({'password': password}),
     );
@@ -216,7 +216,7 @@ class Bridge {
       if (_cookie == null) await login(password);
       final wsUri = baseUrl.replace(
         scheme: baseUrl.scheme == 'https' ? 'wss' : 'ws',
-        path: '/ws',
+        path: '${baseUrl.path}/ws',
       );
       final socket = connectBridgeSocket(wsUri, cookie: _cookie);
       _socket = socket;
@@ -584,11 +584,24 @@ class Bridge {
     });
   }
 
+  /// provider-agnostic reachability facts for the connect/setup screens
+  Future<Map<String, dynamic>> info() async {
+    final res = await http.get(baseUrl.resolve('api/info'));
+    if (res.statusCode != 200) {
+      throw BridgeError('Could not read bridge info (${res.statusCode})');
+    }
+    final decoded = jsonDecode(res.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw BridgeError('Bridge info was not an object');
+    }
+    return decoded;
+  }
+
   /// staged files live in the bridge's upload directory, not the workspace;
   /// the bridge owns retention
   Future<StagedFile> upload(String filename, List<int> bytes) async {
     final uri = baseUrl.replace(
-      path: '/api/terminal-upload',
+      path: '${baseUrl.path}/api/terminal-upload',
       queryParameters: {'filename': filename},
     );
     final res = await http.post(
@@ -643,7 +656,7 @@ class Bridge {
     final directory = slash > 0 ? path.substring(0, slash) : '';
     final filename = slash >= 0 ? path.substring(slash + 1) : path;
     final uri = baseUrl.replace(
-      path: '/api/file/upload',
+      path: '${baseUrl.path}/api/file/upload',
       queryParameters: {
         'workspace_id': workspaceId,
         'directory': directory,
@@ -680,7 +693,7 @@ class Bridge {
 
   Future<void> deleteFile(String workspaceId, String path) async {
     final uri = baseUrl.replace(
-      path: '/api/file/delete',
+      path: '${baseUrl.path}/api/file/delete',
       queryParameters: {'workspace_id': workspaceId, 'path': path},
     );
     final res = await http.post(uri, headers: _authHeaders);

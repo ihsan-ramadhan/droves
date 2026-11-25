@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../bridge/bridge.dart';
 import '../theme/tokens.dart';
 import 'widgets.dart';
 
@@ -304,9 +305,16 @@ class _FilesScreenState extends State<FilesScreen> with BridgeAccess {
   Widget build(BuildContext context) {
     final c = context.colors;
     final title = _stackDirs.isEmpty ? widget.label : _stackDirs.last.name;
+    final status = connectionSubtitle(context, _error);
     return DrovesScaffold(
       title: 'Files',
-      subtitle: LedgerLabel(_currentPath.isEmpty ? widget.label : _currentPath),
+      subtitle: LedgerLabel(
+        status.isNotEmpty
+            ? status
+            : _currentPath.isEmpty
+            ? widget.label
+            : _currentPath,
+      ),
       leading: IconButton(
         icon: Icon(
           _stackDirs.isEmpty ? Icons.arrow_back : Icons.arrow_upward,
@@ -365,30 +373,27 @@ class _FilesScreenState extends State<FilesScreen> with BridgeAccess {
 
   Widget _buildBody(BuildContext context, String title) {
     final c = context.colors;
-    if (_loading) {
-      return const SkeletonRows(rows: 8, rowHeight: 52);
-    }
-    if (_error != null) {
-      return StateMessage(
-        headline: 'Could not read this folder',
-        body: _error!,
-        icon: Icons.folder_off_outlined,
-        action: OutlinedButton(
-          onPressed: () => _load(_currentPath),
-          child: Text('Try again', style: monoStyle(context, size: 12)),
-        ),
-      );
-    }
-    if (_entries.isEmpty) {
-      return StateMessage(
-        headline: 'Empty folder',
-        body: 'No files here. Use + to add one.',
-        icon: Icons.folder_open_outlined,
-        action: OutlinedButton(
-          onPressed: _createFile,
-          child: Text('New file', style: monoStyle(context, size: 12)),
-        ),
-      );
+    final live = app.bridge;
+    final connected = live != null && live.state == BridgeState.ready;
+    final state = ScreenState(
+      loading: _loading,
+      error: _error,
+      connected: connected,
+      empty: _entries.isEmpty,
+      subject: 'folder',
+      emptyHeadline: 'Empty folder',
+      emptyBody: 'No files here. Use + to add one.',
+      onRetry: connectionRetry(context, () => _load(_currentPath)),
+      rows: 8,
+      rowHeight: 52,
+      emptyIcon: Icons.folder_open_outlined,
+      emptyAction: OutlinedButton(
+        onPressed: _createFile,
+        child: Text('New file', style: monoStyle(context, size: 12)),
+      ),
+    );
+    if (_loading || !connected || _error != null || _entries.isEmpty) {
+      return state;
     }
     return RefreshIndicator(
       color: c.ink,
@@ -568,6 +573,8 @@ class _FileScreenState extends State<FileScreen> with BridgeAccess {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
+    final live = app.bridge;
+    final connected = live != null && live.state == BridgeState.ready;
     return PopScope(
       canPop: !_editing || _editor.text == _text,
       onPopInvokedWithResult: (didPop, _) {
@@ -610,19 +617,19 @@ class _FileScreenState extends State<FileScreen> with BridgeAccess {
                     onPressed: () => setState(() => _editing = true),
                   ),
         ],
-        child: _loading
-            ? const SkeletonRows(rows: 10, rowHeight: 26)
-            : _error != null
-            ? StateMessage(
-                headline: 'Could not read this file',
-                body: _error!,
-                icon: Icons.error_outline,
-              )
-            : _binary
-            ? const StateMessage(
-                headline: 'Binary file',
-                body: 'Only text files can be opened here.',
-                icon: Icons.data_object_outlined,
+        child: _loading || !connected || _error != null || _binary
+            ? ScreenState(
+                loading: _loading,
+                error: _error,
+                connected: connected,
+                empty: _binary,
+                subject: 'file',
+                emptyHeadline: 'Binary file',
+                emptyBody: 'Only text files can be opened here.',
+                onRetry: connectionRetry(context, _load),
+                rows: 10,
+                rowHeight: 26,
+                emptyIcon: Icons.data_object_outlined,
               )
             : _editing
             ? Padding(

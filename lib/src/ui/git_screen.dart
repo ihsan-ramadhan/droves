@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../bridge/bridge.dart';
 import '../theme/tokens.dart';
 import 'widgets.dart';
 
@@ -287,10 +288,15 @@ class _GitScreenState extends State<GitScreen>
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
+    final status = connectionSubtitle(context, _error);
     return DrovesScaffold(
       title: 'Changes',
       subtitle: LedgerLabel(
-        _repo == null ? widget.label : '$_repo · ${widget.label}',
+        status.isNotEmpty
+            ? status
+            : _repo == null
+            ? widget.label
+            : '$_repo · ${widget.label}',
       ),
       leading: IconButton(
         icon: const Icon(Icons.arrow_back, size: 20),
@@ -428,26 +434,23 @@ class _GitScreenState extends State<GitScreen>
 
   Widget _buildBody(BuildContext context) {
     final c = context.colors;
-    if (_loading) {
-      return const SkeletonRows(rows: 7, rowHeight: 64);
-    }
-    if (_error != null) {
-      return StateMessage(
-        headline: 'This workspace is not a git checkout',
-        body: _error!,
-        icon: Icons.account_tree_outlined,
-        action: OutlinedButton(
-          onPressed: _load,
-          child: Text('Try again', style: monoStyle(context, size: 12)),
-        ),
-      );
-    }
-    if (_entries.isEmpty) {
-      return StateMessage(
-        headline: 'Nothing to review',
-        body: 'No pending changes.',
-        icon: Icons.check_circle_outline,
-      );
+    final live = app.bridge;
+    final connected = live != null && live.state == BridgeState.ready;
+    final state = ScreenState(
+      loading: _loading,
+      error: _error,
+      connected: connected,
+      empty: _entries.isEmpty,
+      subject: 'changes',
+      emptyHeadline: 'Nothing to review',
+      emptyBody: 'No pending changes.',
+      onRetry: connectionRetry(context, _load),
+      rows: 7,
+      rowHeight: 64,
+      emptyIcon: Icons.check_circle_outline,
+    );
+    if (_loading || !connected || _error != null || _entries.isEmpty) {
+      return state;
     }
     return RefreshIndicator(
       color: c.ink,
@@ -560,6 +563,8 @@ class _DiffScreenState extends State<DiffScreen> with BridgeAccess {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
+    final live = app.bridge;
+    final connected = live != null && live.state == BridgeState.ready;
     return DrovesScaffold(
       title: widget.path.split('/').last,
       subtitle: LedgerLabel(widget.path),
@@ -569,19 +574,19 @@ class _DiffScreenState extends State<DiffScreen> with BridgeAccess {
         tooltip: 'Back',
         onPressed: () => Navigator.of(context).maybePop(),
       ),
-      child: _loading
-          ? const SkeletonRows(rows: 12, rowHeight: 24)
-          : _error != null
-          ? StateMessage(
-              headline: 'Diff failed',
-              body: _error!,
-              icon: Icons.error_outline,
-            )
-          : _patch.isEmpty
-          ? const StateMessage(
-              headline: 'No patch',
-              body: 'No text changes in this file.',
-              icon: Icons.remove_circle_outline,
+      child: _loading || !connected || _error != null || _patch.isEmpty
+          ? ScreenState(
+              loading: _loading,
+              error: _error,
+              connected: connected,
+              empty: _patch.isEmpty,
+              subject: 'diff',
+              emptyHeadline: 'No patch',
+              emptyBody: 'No text changes in this file.',
+              onRetry: connectionRetry(context, _load),
+              rows: 12,
+              rowHeight: 24,
+              emptyIcon: Icons.remove_circle_outline,
             )
           : ListView.builder(
               itemCount: _patch.split('\n').length,
@@ -720,22 +725,23 @@ class _CommitsScreenState extends State<CommitsScreen> with BridgeAccess {
 
   Widget _buildBody(BuildContext context) {
     final c = context.colors;
-    if (_loading) {
-      return const SkeletonRows(rows: 8, rowHeight: 64);
-    }
-    if (_error != null) {
-      return StateMessage(
-        headline: 'History unavailable',
-        body: _error!,
-        icon: Icons.error_outline,
-      );
-    }
-    if (_commits.isEmpty) {
-      return const StateMessage(
-        headline: 'No commits',
-        body: 'This branch has no commits.',
-        icon: Icons.history,
-      );
+    final live = app.bridge;
+    final connected = live != null && live.state == BridgeState.ready;
+    final state = ScreenState(
+      loading: _loading,
+      error: _error,
+      connected: connected,
+      empty: _commits.isEmpty,
+      subject: 'commit history',
+      emptyHeadline: 'No commits',
+      emptyBody: 'This branch has no commits.',
+      onRetry: connectionRetry(context, _load),
+      rows: 8,
+      rowHeight: 64,
+      emptyIcon: Icons.history,
+    );
+    if (_loading || !connected || _error != null || _commits.isEmpty) {
+      return state;
     }
     return ListView.separated(
       itemCount: _commits.length,
@@ -855,6 +861,8 @@ class _CommitScreenState extends State<CommitScreen> with BridgeAccess {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
+    final live = app.bridge;
+    final connected = live != null && live.state == BridgeState.ready;
     return DrovesScaffold(
       title: widget.commit.subject,
       subtitle: LedgerLabel(widget.commit.shortSha),
@@ -864,19 +872,19 @@ class _CommitScreenState extends State<CommitScreen> with BridgeAccess {
         tooltip: 'Back',
         onPressed: () => Navigator.of(context).maybePop(),
       ),
-      child: _loading
-          ? const SkeletonRows(rows: 6, rowHeight: 56)
-          : _error != null
-          ? StateMessage(
-              headline: 'Commit files unavailable',
-              body: _error!,
-              icon: Icons.error_outline,
-            )
-          : _files.isEmpty
-          ? const StateMessage(
-              headline: 'No changed files',
-              body: 'No file changes in this commit.',
-              icon: Icons.remove_circle_outline,
+      child: _loading || !connected || _error != null || _files.isEmpty
+          ? ScreenState(
+              loading: _loading,
+              error: _error,
+              connected: connected,
+              empty: _files.isEmpty,
+              subject: 'commit files',
+              emptyHeadline: 'No changed files',
+              emptyBody: 'No file changes in this commit.',
+              onRetry: connectionRetry(context, _load),
+              rows: 6,
+              rowHeight: 56,
+              emptyIcon: Icons.remove_circle_outline,
             )
           : ListView.separated(
               itemCount: _files.length,

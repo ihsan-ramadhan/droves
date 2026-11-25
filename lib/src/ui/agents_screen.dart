@@ -72,12 +72,15 @@ class _AgentsScreenState extends State<AgentsScreen> with BridgeAccess {
   @override
   Widget build(BuildContext context) {
     final waiting = _agents.where((a) => a.agentStatus == 'blocked').length;
+    final status = connectionSubtitle(context, _error);
+    final connectionLabel = status.isEmpty ? null : status;
     return DrovesScaffold(
       title: 'Agents',
       subtitle: LedgerLabel(
-        _loading
-            ? 'reading agents'
-            : '${_agents.length} running · $waiting waiting',
+        connectionLabel ??
+            (_loading
+                ? 'reading agents'
+                : '${_agents.length} running · $waiting waiting'),
       ),
       actions: [RefreshButton(busy: _loading, onPressed: _load)],
       child: _buildBody(context),
@@ -86,26 +89,23 @@ class _AgentsScreenState extends State<AgentsScreen> with BridgeAccess {
 
   Widget _buildBody(BuildContext context) {
     final c = context.colors;
-    if (_loading && _agents.isEmpty) {
-      return const SkeletonRows(rows: 6, rowHeight: 60);
-    }
-    if (_error != null) {
-      return StateMessage(
-        headline: 'Could not list agents',
-        body: _error!,
-        icon: Icons.error_outline,
-        action: OutlinedButton(
-          onPressed: _load,
-          child: Text('Try again', style: monoStyle(context, size: 12)),
-        ),
-      );
-    }
-    if (_agents.isEmpty) {
-      return const StateMessage(
-        headline: 'No agents running',
-        body: 'Start an agent in a pane on the machine.',
-        icon: Icons.smart_toy_outlined,
-      );
+    final live = app.bridge;
+    final connected = live != null && live.state == BridgeState.ready;
+    final state = ScreenState(
+      loading: _loading && _agents.isEmpty,
+      error: _error,
+      connected: connected,
+      empty: _agents.isEmpty,
+      subject: 'agents',
+      emptyHeadline: 'No agents running',
+      emptyBody: 'Start an agent in a pane on the machine.',
+      onRetry: connectionRetry(context, _load),
+      rows: 6,
+      rowHeight: 60,
+      emptyIcon: Icons.smart_toy_outlined,
+    );
+    if (_loading && _agents.isEmpty || !connected || _error != null || _agents.isEmpty) {
+      return state;
     }
     final sorted = [..._agents]
       ..sort((a, b) {
@@ -200,6 +200,70 @@ class _AgentsScreenState extends State<AgentsScreen> with BridgeAccess {
   }
 }
 
+class _ExposureTile extends StatefulWidget {
+  const _ExposureTile();
+
+  @override
+  State<_ExposureTile> createState() => _ExposureTileState();
+}
+
+class _ExposureTileState extends State<_ExposureTile> with BridgeAccess {
+  Map<String, dynamic>? _info;
+  String? _error;
+
+  @override
+  void onBridgeReady() => _load();
+
+  Future<void> _load() async {
+    try {
+      final info = await bridge.info();
+      if (!mounted) return;
+      setState(() {
+        _info = info;
+        _error = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = e.toString());
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final exposure = (_info?['exposure'] as Map?) ?? const {};
+    final provider = exposure['provider']?.toString() ?? 'unknown';
+    final state = exposure['state']?.toString() ?? 'unknown';
+    final url = exposure['url']?.toString() ?? _info?['public_url']?.toString() ?? '';
+    final label = switch (provider) {
+      'none' => 'Loopback only, published by your own tunnel or proxy',
+      'tailscale' => 'Tailscale serve (tailnet only)',
+      'tailscale-funnel' => 'Tailscale Funnel (public)',
+      'cloudflared' => 'Cloudflare Tunnel',
+      _ => provider,
+    };
+    final status = switch (state) {
+      'published' => 'connected',
+      'partial' => 'connected, needs a public URL',
+      'error' => 'error',
+      _ => 'not published by the bridge',
+    };
+    return ListTile(
+      title: Text('How this bridge is reached', style: monoStyle(context, size: 12)),
+      subtitle: Text(
+        _error ?? '$label · $status${url.isEmpty ? '' : '\n$url'}',
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: monoStyle(context, size: 10.5, color: c.muted),
+      ),
+      onTap: _error == null ? null : _load,
+      trailing: _error != null
+          ? Icon(Icons.refresh, size: 16, color: c.muted)
+          : null,
+    );
+  }
+}
+
 /// connection and theme settings; everything else lives where it is used
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({
@@ -236,6 +300,9 @@ class SettingsScreen extends StatelessWidget {
             ),
             Divider(color: c.rule, height: 1),
           ],
+          _Section('Connection'),
+          const _ExposureTile(),
+          Divider(color: c.rule, height: 1),
           _Section('Bridge'),
           ListTile(
             title: Text('Endpoint', style: monoStyle(context, size: 12)),

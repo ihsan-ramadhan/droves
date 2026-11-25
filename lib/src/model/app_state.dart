@@ -242,6 +242,14 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     await prefs.setBool(_kAutoReconnect, value);
   }
 
+  /// user-initiated retry from a screen's error state; ignores backoff
+  Future<void> reconnect() async {
+    if (endpoints.isEmpty) return;
+    final current = bridge;
+    if (current != null && current.state == BridgeState.ready) return;
+    await useEndpoint(activeIndex);
+  }
+
   /// bounded retries with backoff: a resume can land before the network is up
   Future<void> _ensureConnected() async {
     if (_disposed || !autoReconnect || endpoints.isEmpty) return;
@@ -295,7 +303,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     return u != null &&
         u.scheme == Uri.base.scheme &&
         u.host == Uri.base.host &&
-        u.port == Uri.base.port;
+        u.port == Uri.base.port &&
+        u.path == Uri.base.path;
   }
 
   /// re-adding the same URL replaces the stored token instead of growing the list
@@ -303,7 +312,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     final normalised = url.trim().endsWith('/') ? url.trim() : '${url.trim()}/';
     final uri = Uri.parse(normalised);
     if (!uri.hasScheme || uri.host.isEmpty) {
-      throw BridgeError('Enter a host like https://machine.tailnet.ts.net');
+      throw BridgeError('Enter a bridge URL, e.g. https://machine.example.com/');
     }
     if (kIsWeb && !_sameOriginAsPage(normalised)) {
       throw BridgeError(
@@ -385,4 +394,8 @@ class AppScope extends InheritedNotifier<AppState> {
 
   static AppState of(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<AppScope>()!.notifier!;
+
+  /// null outside the app shell, e.g. a widget test that only mounts one screen
+  static AppState? maybeOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<AppScope>()?.notifier;
 }

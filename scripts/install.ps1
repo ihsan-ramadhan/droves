@@ -112,8 +112,10 @@ try {
   Write-Host "       droves-bridge -addr 127.0.0.1:13030 -web `"$shareDir\web`""
   Write-Host "  3. read the access token:"
   Write-Host "       type `"`$env:USERPROFILE\.config\droves-bridge\token`""
-  Write-Host "  4. expose the port on your tailnet only:"
-  Write-Host "       tailscale serve --bg 13030"
+  Write-Host "  4. publish the loopback port with your tunnel or reverse proxy,"
+  Write-Host "     then paste the published address and token in the app."
+  Write-Host "     Examples: droves-bridge expose -provider tailscale"
+  Write-Host "               droves-bridge expose token -provider cloudflared <TOKEN>"
   Write-Host ""
   Write-Host "Update later by running this script again."
 }

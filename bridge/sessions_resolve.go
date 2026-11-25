@@ -28,6 +28,8 @@ func normalizeAgentName(name string) string {
 		return "muse"
 	case "agy", "antigravity", "antigravity-cli":
 		return "agy"
+	case "jcode", "j-code":
+		return "jcode"
 	default:
 		return strings.ToLower(strings.TrimSpace(name))
 	}
@@ -139,6 +141,8 @@ func resolveSessionFile(agent, id, cwd string) string {
 		return resolvePiSession(id)
 	case "omp":
 		return resolveOmpSession(id)
+	case "jcode":
+		return recentJcodeSession(id)
 	}
 	return ""
 }

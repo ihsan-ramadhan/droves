@@ -391,16 +391,29 @@ class _TerminalScreenState extends State<TerminalScreen> {
       title: widget.workspaceLabel,
       subtitle: Row(
         children: [
-          StatusWord(_agentStatus),
-          const SizedBox(width: Space.sm),
-          Flexible(
-            child: Text(
-              _shortCwd(widget.pane.cwd),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: monoStyle(context, size: 10, color: c.muted),
+          // a dead socket leaves the last grid on screen; say so instead of
+          // letting a frozen terminal look live
+          if (connectionSubtitle(context, null).isNotEmpty)
+            Flexible(
+              child: Text(
+                connectionSubtitle(context, null),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: monoStyle(context, size: 10, color: c.muted),
+              ),
+            )
+          else ...[
+            StatusWord(_agentStatus),
+            const SizedBox(width: Space.sm),
+            Flexible(
+              child: Text(
+                _shortCwd(widget.pane.cwd),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: monoStyle(context, size: 10, color: c.muted),
+              ),
             ),
-          ),
+          ],
         ],
       ),
       leading: IconButton(

@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
-	"strings"
 	"sync"
 	"time"
 )
@@ -151,10 +150,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	ip := r.RemoteAddr
-	if idx := strings.LastIndexByte(ip, ':'); idx > 0 {
-		ip = ip[:idx]
-	}
+	ip := s.ingress.ClientIP(r)
 	if !s.sessions.allowed(ip) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": "too many attempts; wait two minutes"})
 		return
@@ -183,11 +179,14 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "could not create session"})
 		return
 	}
+	// a tunnel terminates TLS before the bridge sees it, and a base path mount
+	// must scope the cookie to the same prefix the client calls back on
 	http.SetCookie(w, &http.Cookie{
 		Name:     "droves_session",
 		Value:    id,
-		Path:     "/",
+		Path:     s.ingress.CookiePath(),
 		HttpOnly: true,
+		Secure:   s.ingress.Secure(r),
 		SameSite: http.SameSiteStrictMode,
 		MaxAge:   30 * 24 * 60 * 60,
 	})

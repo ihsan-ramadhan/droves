@@ -13,6 +13,7 @@ RPC endpoint. The client implements this contract in
 | --- | --- |
 | `POST /api/login` | `{"password":"…"}`; `200` plus a session cookie |
 | `GET /api/health` | `{"ok":true,"service":"droves-bridge","version":"…"}`; no auth |
+| `GET /api/info` | provider-agnostic reachability facts; no auth |
 | `GET /droves/update.json` | in-app update manifest, served `no-cache` |
 | `GET /ws` | JSON RPC over WebSocket, authenticated by that cookie |
 | `/droves/` | Static web build, same origin as the API; served `no-cache` so a deploy cannot leave a stale bundle |
@@ -22,8 +23,22 @@ RPC endpoint. The client implements this contract in
 
 The login endpoint is the only one that accepts the token. Browsers hide
 `Set-Cookie` from JavaScript, so web clients rely on the cookie jar and must be
-served from the bridge origin. Non-loopback access should be protected by a
-private network.
+served from the bridge origin.
+
+Paths are relative to the optional mount prefix (`-base-path`, or the path in
+`-public-url`): a bridge mounted at `/bridge` answers `/bridge/api/login`,
+`/bridge/ws` and serves the web build at `/bridge/droves/`. The cookie uses
+that prefix as its `Path` and gains `Secure` when the request arrives over
+HTTPS or a trusted proxy forwards `X-Forwarded-Proto: https`.
+
+Reachability is separate from the transport. `-expose` picks a provider
+(`none`, `tailscale`, `tailscale-funnel`, `cloudflared`) that publishes the
+loopback listener; the provider's URL, state and details are returned by
+`bridge.info` so clients can show matching setup steps. The bridge itself has
+no dependency on a particular tunnel. Only proxies in `-trusted-proxies`
+(default loopback CIDRs) may supply forwarded client addresses, schemes or
+hosts. Login rate limits follow the resulting client address, so every user
+behind one tunnel is not collapsed into a single bucket.
 
 ## Messages
 
@@ -79,7 +94,7 @@ pushes `{"assistant": {…}}` and `{"assistant_notification": {…}}` snapshots.
 
 | Method | Parameters | Result |
 | --- | --- | --- |
-| `connections.list` | — | `connections`, each with `id`, `label` |
+| `connections.list` | — | `connections`, each with `id`, `label`, `type`, `state` |
 | `connections.connect` | `connection_id`, `promote_to_default` | — |
 | `workspace.list` | — | `workspaces` |
 | `workspace.create` | `cwd?`, `focus` | — |
@@ -165,7 +180,8 @@ Writes go through `POST /api/file/upload`. Paths are workspace-relative unless
 | Method | Parameters | Result |
 | --- | --- | --- |
 | `bridge.ping` | — | `ok`, `version` |
-| `bridge.status` | — | `state`, `version`, `clients`, `herdr_socket` |
+| `bridge.status` | — | `state`, `version`, `clients`, `herdr_socket`, `exposure` |
+| `bridge.info` | — | `version`, `public_url`, `base_path`, `trusted_proxies`, `exposure`, `providers` |
 
 ### Scout
 

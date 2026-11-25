@@ -113,6 +113,7 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
           .toList();
       if (_search.text.trim().isNotEmpty) _searchIndex = 0;
       _loading = false;
+      _error = null;
     });
   }
 
@@ -503,7 +504,7 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
               style: monoStyle(context, size: 12),
               decoration: InputDecoration(
                 labelText: 'Base URL',
-                hintText: 'https://openrouter.ai/api/v1',
+                hintText: 'https://your-endpoint.example.com/v1',
                 hintStyle: monoStyle(context, size: 11, color: c.muted),
               ),
             ),
@@ -523,7 +524,7 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
               style: monoStyle(context, size: 12),
               decoration: InputDecoration(
                 labelText: 'Model',
-                hintText: 'gpt-4o-mini',
+                hintText: 'model-name',
                 hintStyle: monoStyle(context, size: 11, color: c.muted),
               ),
             ),
@@ -669,13 +670,16 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
     final c = context.colors;
     final model = (_config['model'] as String?) ?? '';
     final provider = (_config['provider'] as String?) ?? '';
+    final status = connectionSubtitle(context, _error);
     return DrovesScaffold(
       title: 'Scout',
       subtitle: Row(
         children: [
           Flexible(
             child: LedgerLabel(
-              model.isEmpty
+              status.isNotEmpty
+                  ? status
+                  : model.isEmpty
                   ? 'no model selected'
                   : '${_config['cli'] ?? 'omp'} $provider/$model',
             ),
@@ -837,32 +841,29 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
 
   Widget _buildBody(BuildContext context) {
     final c = context.colors;
-    if (_loading) {
-      return const SkeletonRows(rows: 5, rowHeight: 72);
-    }
-    if (_error != null) {
-      return StateMessage(
-        headline: 'Scout is not answering',
-        body: _error!,
-        icon: Icons.error_outline,
-        action: OutlinedButton(
-          onPressed: _load,
-          child: Text('Try again', style: monoStyle(context, size: 12)),
-        ),
-      );
-    }
-    if (_messages.isEmpty) {
-      return StateMessage(
-        headline: 'Ask about your workspaces',
-        body:
-            'Scout reads history, diffs, and terminal output through the '
-            'bridge. Pick a model first.',
-        icon: Icons.auto_awesome_outlined,
-        action: OutlinedButton(
-          onPressed: _pickModel,
-          child: Text('Pick a model', style: monoStyle(context, size: 12)),
-        ),
-      );
+    final live = app.bridge;
+    final connected = live != null && live.state == BridgeState.ready;
+    final state = ScreenState(
+      loading: _loading,
+      error: _error,
+      connected: connected,
+      empty: _messages.isEmpty,
+      subject: 'Scout',
+      emptyHeadline: 'Ask about your workspaces',
+      emptyBody:
+          'Scout reads history, diffs, and terminal output through the '
+          'bridge. Pick a model first.',
+      onRetry: connectionRetry(context, _load),
+      rows: 5,
+      rowHeight: 72,
+      emptyIcon: Icons.auto_awesome_outlined,
+      emptyAction: OutlinedButton(
+        onPressed: _pickModel,
+        child: Text('Pick a model', style: monoStyle(context, size: 12)),
+      ),
+    );
+    if (_loading || !connected || _error != null || _messages.isEmpty) {
+      return state;
     }
     return ListView.separated(
       controller: _scroll,
