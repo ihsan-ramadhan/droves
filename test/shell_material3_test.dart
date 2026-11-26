@@ -20,10 +20,7 @@ void main() {
                 data: MediaQuery.of(context).copyWith(size: size),
                 child: child ?? const SizedBox.shrink(),
               ),
-        home: Shell(
-          themeMode: ThemeMode.system,
-          onThemeChanged: (_) {},
-        ),
+        home: Shell(themeMode: ThemeMode.system, onThemeChanged: (_) {}),
       ),
     ),
   );
@@ -48,10 +45,12 @@ void main() {
     final bar = tester.widget<NavigationBar>(find.byType(NavigationBar));
     expect(bar.selectedIndex, 0);
 
-    await tester.tap(find.descendant(
-      of: find.byType(NavigationBar),
-      matching: find.text('Settings'),
-    ));
+    await tester.tap(
+      find.descendant(
+        of: find.byType(NavigationBar),
+        matching: find.text('Settings'),
+      ),
+    );
     await tester.pumpAndSettle();
 
     final updated = tester.widget<NavigationBar>(find.byType(NavigationBar));
@@ -66,10 +65,12 @@ void main() {
     expect(find.byType(AnimatedSwitcher), findsNothing);
     expect(find.byType(SlideTransition), findsNothing);
 
-    await tester.tap(find.descendant(
-      of: find.byType(NavigationBar),
-      matching: find.text('Settings'),
-    ));
+    await tester.tap(
+      find.descendant(
+        of: find.byType(NavigationBar),
+        matching: find.text('Settings'),
+      ),
+    );
     await tester.pump();
 
     expect(find.byType(SettingsScreen), findsOneWidget);

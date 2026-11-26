@@ -104,11 +104,7 @@ const _cursorFinal = <String, String>{
   'end': 'F',
 };
 
-const _tildeDigits = <String, String>{
-  'pgup': '5',
-  'pgdn': '6',
-  'delete': '3',
-};
+const _tildeDigits = <String, String>{'pgup': '5', 'pgdn': '6', 'delete': '3'};
 
 /// 1 + shift(1) + alt(2) + ctrl(4), the xterm modifier parameter
 String _modifierParam(Set<String> modifiers) {

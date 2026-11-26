@@ -312,7 +312,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     final normalised = url.trim().endsWith('/') ? url.trim() : '${url.trim()}/';
     final uri = Uri.parse(normalised);
     if (!uri.hasScheme || uri.host.isEmpty) {
-      throw BridgeError('Enter a bridge URL, e.g. https://machine.example.com/');
+      throw BridgeError(
+        'Enter a bridge URL, e.g. https://machine.example.com/',
+      );
     }
     if (kIsWeb && !_sameOriginAsPage(normalised)) {
       throw BridgeError(

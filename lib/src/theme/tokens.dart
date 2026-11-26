@@ -67,7 +67,6 @@ class DrovesColors extends ThemeExtension<DrovesColors> {
     );
   }
 
-
   @override
   DrovesColors copyWith({
     Color? ink,
@@ -153,24 +152,25 @@ ThemeData drovesTheme(Brightness brightness) {
   final c = brightness == Brightness.dark
       ? DrovesColors.dark
       : DrovesColors.light;
-  final scheme = ColorScheme.fromSeed(
-    seedColor: DrovesColors.seed,
-    brightness: brightness,
-  ).copyWith(
-    surface: c.surface,
-    primary: c.accent,
-    onPrimary: brightness == Brightness.dark
-        ? const Color(0xFF3A1A0B)
-        : Colors.white,
-    onSurface: c.ink,
-    onSurfaceVariant: c.muted,
-    outlineVariant: c.rule,
-    secondary: c.accent,
-    onSecondary: brightness == Brightness.dark
-        ? const Color(0xFF3A1A0B)
-        : Colors.white,
-    error: c.error,
-  );
+  final scheme =
+      ColorScheme.fromSeed(
+        seedColor: DrovesColors.seed,
+        brightness: brightness,
+      ).copyWith(
+        surface: c.surface,
+        primary: c.accent,
+        onPrimary: brightness == Brightness.dark
+            ? const Color(0xFF3A1A0B)
+            : Colors.white,
+        onSurface: c.ink,
+        onSurfaceVariant: c.muted,
+        outlineVariant: c.rule,
+        secondary: c.accent,
+        onSecondary: brightness == Brightness.dark
+            ? const Color(0xFF3A1A0B)
+            : Colors.white,
+        error: c.error,
+      );
   final base = ThemeData(
     useMaterial3: true,
     brightness: brightness,
@@ -203,17 +203,21 @@ ThemeData drovesTheme(Brightness brightness) {
       surfaceTintColor: Colors.transparent,
       elevation: 0,
       indicatorColor: c.accent.withValues(alpha: 0.16),
-      iconTheme: WidgetStateProperty.resolveWith((states) => IconThemeData(
-        color: states.contains(WidgetState.selected) ? c.accent : c.muted,
-      )),
-      labelTextStyle: WidgetStateProperty.resolveWith((states) => TextStyle(
-        fontFamily: 'PlexMono',
-        fontSize: 11,
-        color: states.contains(WidgetState.selected) ? c.accent : c.muted,
-        fontWeight: states.contains(WidgetState.selected)
-            ? FontWeight.w600
-            : FontWeight.w500,
-      )),
+      iconTheme: WidgetStateProperty.resolveWith(
+        (states) => IconThemeData(
+          color: states.contains(WidgetState.selected) ? c.accent : c.muted,
+        ),
+      ),
+      labelTextStyle: WidgetStateProperty.resolveWith(
+        (states) => TextStyle(
+          fontFamily: 'PlexMono',
+          fontSize: 11,
+          color: states.contains(WidgetState.selected) ? c.accent : c.muted,
+          fontWeight: states.contains(WidgetState.selected)
+              ? FontWeight.w600
+              : FontWeight.w500,
+        ),
+      ),
     ),
     navigationRailTheme: NavigationRailThemeData(
       backgroundColor: c.paper,
@@ -226,7 +230,11 @@ ThemeData drovesTheme(Brightness brightness) {
         size: 11,
         color: c.accent,
       ),
-      unselectedLabelTextStyle: monoStyleFor(brightness, size: 11, color: c.muted),
+      unselectedLabelTextStyle: monoStyleFor(
+        brightness,
+        size: 11,
+        color: c.muted,
+      ),
       labelType: NavigationRailLabelType.all,
     ),
     cardTheme: CardThemeData(
@@ -297,12 +305,15 @@ ThemeData drovesTheme(Brightness brightness) {
       style: IconButton.styleFrom(foregroundColor: c.ink),
     ),
     switchTheme: SwitchThemeData(
-      thumbColor: WidgetStateProperty.resolveWith((states) =>
-          states.contains(WidgetState.selected) ? scheme.onPrimary : c.muted),
-      trackColor: WidgetStateProperty.resolveWith((states) =>
-          states.contains(WidgetState.selected)
-              ? c.accent
-              : c.rule.withValues(alpha: 0.7)),
+      thumbColor: WidgetStateProperty.resolveWith(
+        (states) =>
+            states.contains(WidgetState.selected) ? scheme.onPrimary : c.muted,
+      ),
+      trackColor: WidgetStateProperty.resolveWith(
+        (states) => states.contains(WidgetState.selected)
+            ? c.accent
+            : c.rule.withValues(alpha: 0.7),
+      ),
     ),
     pageTransitionsTheme: PageTransitionsTheme(
       builders: {

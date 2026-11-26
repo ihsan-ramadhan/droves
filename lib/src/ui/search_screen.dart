@@ -185,7 +185,10 @@ class _SearchScreenState extends State<SearchScreen> with BridgeAccess {
       onRetry: connectionRetry(context, () => _search(_query.text)),
       emptyIcon: _ran ? Icons.search_off : Icons.search,
     );
-    if (!connected || _error != null || !_ran || _nameHits.isEmpty && _contentHits.isEmpty) {
+    if (!connected ||
+        _error != null ||
+        !_ran ||
+        _nameHits.isEmpty && _contentHits.isEmpty) {
       return state;
     }
     return ListView(

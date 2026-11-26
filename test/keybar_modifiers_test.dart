@@ -35,7 +35,10 @@ void main() {
     expect(applyModifiersToKey({'ctrl'}, keyById('left')!), '\x1b[1;5D');
     expect(applyModifiersToKey({'shift'}, keyById('up')!), '\x1b[1;2A');
     expect(applyModifiersToKey({'alt'}, keyById('right')!), '\x1b[1;3C');
-    expect(applyModifiersToKey({'ctrl', 'shift'}, keyById('right')!), '\x1b[1;6C');
+    expect(
+      applyModifiersToKey({'ctrl', 'shift'}, keyById('right')!),
+      '\x1b[1;6C',
+    );
   });
 
   test('home, end and paging encode the same way', () {

@@ -329,40 +329,40 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> with BridgeAccess {
               padding: const EdgeInsets.symmetric(horizontal: Space.md),
               itemCount: _tabs.length,
               separatorBuilder: (_, _) => const SizedBox(width: Space.sm),
-            itemBuilder: (_, i) {
-              final tab = _tabs[i];
-              final active = tab.tabId == _activeTab;
-              return Center(
-                child: InkWell(
-                  onTap: () => setState(() => _activeTab = tab.tabId),
-                  onLongPress: () => _tabActions(tab),
-                  borderRadius: BorderRadius.circular(Radii.lg),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: Space.md,
-                      vertical: 10,
-                    ),
-                    decoration: BoxDecoration(
-                      color: active
-                          ? Theme.of(context).colorScheme.primaryContainer
-                          : Colors.transparent,
-                      borderRadius: BorderRadius.circular(Radii.lg),
-                    ),
-                    child: Text(
-                      tab.label.isEmpty ? 'Tab ${tab.number}' : tab.label,
-                      style: monoStyle(
-                        context,
-                        size: 11,
+              itemBuilder: (_, i) {
+                final tab = _tabs[i];
+                final active = tab.tabId == _activeTab;
+                return Center(
+                  child: InkWell(
+                    onTap: () => setState(() => _activeTab = tab.tabId),
+                    onLongPress: () => _tabActions(tab),
+                    borderRadius: BorderRadius.circular(Radii.lg),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: Space.md,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
                         color: active
-                            ? Theme.of(context).colorScheme.onPrimaryContainer
-                            : c.ink,
-                        weight: active ? FontWeight.w600 : FontWeight.w400,
+                            ? Theme.of(context).colorScheme.primaryContainer
+                            : Colors.transparent,
+                        borderRadius: BorderRadius.circular(Radii.lg),
+                      ),
+                      child: Text(
+                        tab.label.isEmpty ? 'Tab ${tab.number}' : tab.label,
+                        style: monoStyle(
+                          context,
+                          size: 11,
+                          color: active
+                              ? Theme.of(context).colorScheme.onPrimaryContainer
+                              : c.ink,
+                          weight: active ? FontWeight.w600 : FontWeight.w400,
+                        ),
                       ),
                     ),
                   ),
-                ),
-              );
-            },
+                );
+              },
             ),
           ),
         if (_tabs.length > 1) Container(height: 1, color: c.rule),

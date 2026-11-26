@@ -147,10 +147,7 @@ class _ConnectionsScreenState extends State<ConnectionsScreen>
           ),
           Divider(color: c.rule, height: 1),
           _GroupLabel('Hosts in this bridge'),
-          if (_loading ||
-              _error != null ||
-              !connected ||
-              _connections.isEmpty)
+          if (_loading || _error != null || !connected || _connections.isEmpty)
             ScreenState(
               loading: _loading,
               error: _error,
@@ -158,8 +155,7 @@ class _ConnectionsScreenState extends State<ConnectionsScreen>
               empty: _connections.isEmpty,
               subject: 'hosts',
               emptyHeadline: 'No hosts inside this bridge',
-              emptyBody:
-                  'Add a host on the machine that runs the bridge, then refresh.',
+              emptyBody: 'Add a host on the machine that runs the bridge, then refresh.',
               onRetry: connectionRetry(context, _load),
               rows: 2,
               rowHeight: 56,

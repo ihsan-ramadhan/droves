@@ -88,9 +88,8 @@ class _InboxScreenState extends State<InboxScreen> with BridgeAccess {
               ).push(MaterialPageRoute(builder: (_) => const ConnectScreen())),
               child: Text(
                 'Add bridge',
-                style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                  color: Theme.of(context).colorScheme.onPrimary,
-                ),
+                style: Theme.of(context).textTheme.labelLarge
+                    ?.copyWith(color: Theme.of(context).colorScheme.onPrimary),
               ),
             ),
           ),
@@ -174,54 +173,54 @@ class _WorkspaceRow extends StatelessWidget {
         vertical: 6,
       ),
       title: Row(
-          children: [
-            SizedBox(
-              width: 26,
-              child: Text(
-                workspace.number.toString().padLeft(2, '0'),
-                style: monoStyle(context, size: 11, color: c.muted),
-              ),
+        children: [
+          SizedBox(
+            width: 26,
+            child: Text(
+              workspace.number.toString().padLeft(2, '0'),
+              style: monoStyle(context, size: 11, color: c.muted),
             ),
-            TallyRail(workspaces: [workspace], max: 1),
-            const SizedBox(width: Space.sm),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    workspace.label.isEmpty
-                        ? workspace.workspaceId
-                        : workspace.label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: nameStyle(
-                      context,
-                      size: 16.5,
-                      weight: FontWeight.w600,
-                    ),
+          ),
+          TallyRail(workspaces: [workspace], max: 1),
+          const SizedBox(width: Space.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  workspace.label.isEmpty
+                      ? workspace.workspaceId
+                      : workspace.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: nameStyle(
+                    context,
+                    size: 16.5,
+                    weight: FontWeight.w600,
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '${workspace.tabCount} tab${workspace.tabCount == 1 ? '' : 's'} · ${workspace.paneCount} pane${workspace.paneCount == 1 ? '' : 's'}',
-                    style: monoStyle(context, size: 11, color: c.muted),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: Space.sm),
-            StatusWord(workspace.agentStatus),
-            if (waiting) ...[
-              const SizedBox(width: Space.sm),
-              Container(
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.primary,
-                  borderRadius: BorderRadius.circular(Radii.xs),
                 ),
+                const SizedBox(height: 2),
+                Text(
+                  '${workspace.tabCount} tab${workspace.tabCount == 1 ? '' : 's'} · ${workspace.paneCount} pane${workspace.paneCount == 1 ? '' : 's'}',
+                  style: monoStyle(context, size: 11, color: c.muted),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: Space.sm),
+          StatusWord(workspace.agentStatus),
+          if (waiting) ...[
+            const SizedBox(width: Space.sm),
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.primary,
+                borderRadius: BorderRadius.circular(Radii.xs),
               ),
-            ],
+            ),
           ],
+        ],
       ),
     );
   }

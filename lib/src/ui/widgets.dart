@@ -147,9 +147,8 @@ class DrovesScaffold extends StatelessWidget {
           children: [
             Text(
               title,
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                color: c.ink,
-              ),
+              style: Theme.of(context).textTheme.titleLarge
+                  ?.copyWith(color: c.ink),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
@@ -319,8 +318,7 @@ class ScreenState extends StatelessWidget {
           child: Text('Try again', style: monoStyle(context, size: 12)),
         ),
       );
-    }
-    else if (error != null) {
+    } else if (error != null) {
       state = StateMessage(
         headline: 'Could not read $subject',
         body: error!,
@@ -330,8 +328,7 @@ class ScreenState extends StatelessWidget {
           child: Text('Try again', style: monoStyle(context, size: 12)),
         ),
       );
-    }
-    else if (empty) {
+    } else if (empty) {
       state = StateMessage(
         headline: emptyHeadline,
         body: emptyBody,

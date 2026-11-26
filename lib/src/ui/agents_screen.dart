@@ -104,7 +104,10 @@ class _AgentsScreenState extends State<AgentsScreen> with BridgeAccess {
       rowHeight: 60,
       emptyIcon: Icons.smart_toy_outlined,
     );
-    if (_loading && _agents.isEmpty || !connected || _error != null || _agents.isEmpty) {
+    if (_loading && _agents.isEmpty ||
+        !connected ||
+        _error != null ||
+        _agents.isEmpty) {
       return state;
     }
     final sorted = [..._agents]
@@ -234,7 +237,8 @@ class _ExposureTileState extends State<_ExposureTile> with BridgeAccess {
     final exposure = (_info?['exposure'] as Map?) ?? const {};
     final provider = exposure['provider']?.toString() ?? 'unknown';
     final state = exposure['state']?.toString() ?? 'unknown';
-    final url = exposure['url']?.toString() ?? _info?['public_url']?.toString() ?? '';
+    final url =
+        exposure['url']?.toString() ?? _info?['public_url']?.toString() ?? '';
     final label = switch (provider) {
       'none' => 'Loopback only, published by your own tunnel or proxy',
       'tailscale' => 'Tailscale serve (tailnet only)',
@@ -249,7 +253,10 @@ class _ExposureTileState extends State<_ExposureTile> with BridgeAccess {
       _ => 'not published by the bridge',
     };
     return ListTile(
-      title: Text('How this bridge is reached', style: monoStyle(context, size: 12)),
+      title: Text(
+        'How this bridge is reached',
+        style: monoStyle(context, size: 12),
+      ),
       subtitle: Text(
         _error ?? '$label · $status${url.isEmpty ? '' : '\n$url'}',
         maxLines: 2,

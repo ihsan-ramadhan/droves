@@ -391,25 +391,25 @@ class _ShellState extends State<Shell> {
         backgroundColor: c.paper,
         body: SafeArea(
           child: Row(
-          children: [
-            NavigationRail(
-              selectedIndex: _index,
-              onDestinationSelected: (i) => setState(() => _index = i),
-              labelType: NavigationRailLabelType.all,
-              useIndicator: true,
-              minWidth: 80,
-              destinations: [
-                for (final d in _destinations)
-                  NavigationRailDestination(
-                    icon: Icon(d.$1),
-                    selectedIcon: Icon(d.$2),
-                    label: Text(d.$3),
-                  ),
-              ],
-            ),
-            VerticalDivider(color: c.rule, width: 1),
-            Expanded(child: body),
-          ],
+            children: [
+              NavigationRail(
+                selectedIndex: _index,
+                onDestinationSelected: (i) => setState(() => _index = i),
+                labelType: NavigationRailLabelType.all,
+                useIndicator: true,
+                minWidth: 80,
+                destinations: [
+                  for (final d in _destinations)
+                    NavigationRailDestination(
+                      icon: Icon(d.$1),
+                      selectedIcon: Icon(d.$2),
+                      label: Text(d.$3),
+                    ),
+                ],
+              ),
+              VerticalDivider(color: c.rule, width: 1),
+              Expanded(child: body),
+            ],
           ),
         ),
       );
