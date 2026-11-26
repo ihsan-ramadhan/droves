@@ -171,11 +171,6 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
     final selection = <dynamic>{...allowed};
     final picked = await showModalBottomSheet<List<String>>(
       context: context,
-      backgroundColor: c.paper,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(Radii.card)),
-      ),
       builder: (sheet) => SafeArea(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxHeight: 560),
@@ -349,11 +344,6 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
     final query = ValueNotifier('');
     final selected = await showModalBottomSheet<ScoutModel>(
       context: context,
-      backgroundColor: c.paper,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(Radii.card)),
-      ),
       builder: (sheet) {
         return SafeArea(
           child: SizedBox(
@@ -494,7 +484,6 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
     final saved = await showDialog<bool>(
       context: context,
       builder: (dialog) => AlertDialog(
-        backgroundColor: c.paper,
         title: Text('Custom endpoint', style: nameStyle(context, size: 16)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -582,7 +571,6 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
     final ok = await showDialog<bool>(
       context: context,
       builder: (dialog) => AlertDialog(
-        backgroundColor: c.paper,
         title: Text('Delete chat?', style: nameStyle(context, size: 16)),
         content: Text(
           '"$title" and its messages will be removed. This cannot be undone.',

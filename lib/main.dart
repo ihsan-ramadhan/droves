@@ -298,7 +298,6 @@ class _ShellState extends State<Shell> {
       final allow = await showDialog<bool>(
         context: context,
         builder: (dialog) => AlertDialog(
-          backgroundColor: context.colors.paper,
           title: Text(
             'Turn on notifications?',
             style: nameStyle(context, size: 18),
@@ -370,98 +369,66 @@ class _ShellState extends State<Shell> {
     (Icons.tune, Icons.tune, 'Settings'),
   ];
 
+  Widget _body(int index) => switch (index) {
+    0 => const InboxScreen(),
+    1 => const AgentsScreen(),
+    2 => const ScoutScreen(),
+    3 => const _ChangesGate(),
+    _ => SettingsScreen(
+      themeMode: widget.themeMode,
+      onThemeChanged: widget.onThemeChanged,
+    ),
+  };
+
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
     final wide = context.isWide;
-    final body = switch (_index) {
-      0 => const InboxScreen(),
-      1 => const AgentsScreen(),
-      2 => const ScoutScreen(),
-      3 => const _ChangesGate(),
-      _ => SettingsScreen(
-        themeMode: widget.themeMode,
-        onThemeChanged: widget.onThemeChanged,
-      ),
-    };
+    final body = _body(_index);
 
     if (wide) {
       return Scaffold(
         backgroundColor: c.paper,
-        body: Row(
+        body: SafeArea(
+          child: Row(
           children: [
             NavigationRail(
-              backgroundColor: c.paper,
               selectedIndex: _index,
               onDestinationSelected: (i) => setState(() => _index = i),
               labelType: NavigationRailLabelType.all,
-              indicatorColor: c.ink,
-              selectedIconTheme: IconThemeData(color: c.paper, size: 20),
-              unselectedIconTheme: IconThemeData(color: c.muted, size: 20),
+              useIndicator: true,
+              minWidth: 80,
               destinations: [
                 for (final d in _destinations)
                   NavigationRailDestination(
                     icon: Icon(d.$1),
                     selectedIcon: Icon(d.$2),
-                    label: Text(d.$3, style: monoStyle(context, size: 10)),
+                    label: Text(d.$3),
                   ),
               ],
             ),
             VerticalDivider(color: c.rule, width: 1),
             Expanded(child: body),
           ],
+          ),
         ),
       );
     }
 
     return Scaffold(
       backgroundColor: c.paper,
-      body: body,
-      bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          color: c.paper,
-          border: Border(top: BorderSide(color: c.rule)),
-        ),
-        child: SafeArea(
-          top: false,
-          child: SizedBox(
-            height: 56,
-            child: Row(
-              children: [
-                for (var i = 0; i < _destinations.length; i++)
-                  Expanded(
-                    child: InkWell(
-                      onTap: () => setState(() => _index = i),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            _index == i
-                                ? _destinations[i].$2
-                                : _destinations[i].$1,
-                            size: 20,
-                            color: _index == i ? c.ink : c.muted,
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            _destinations[i].$3,
-                            style: monoStyle(
-                              context,
-                              size: 9.5,
-                              color: _index == i ? c.ink : c.muted,
-                              weight: _index == i
-                                  ? FontWeight.w600
-                                  : FontWeight.w400,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-              ],
+      body: SafeArea(top: false, bottom: false, child: body),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _index,
+        onDestinationSelected: (i) => setState(() => _index = i),
+        destinations: [
+          for (final d in _destinations)
+            NavigationDestination(
+              icon: Icon(d.$1),
+              selectedIcon: Icon(d.$2),
+              label: d.$3,
             ),
-          ),
-        ),
+        ],
       ),
     );
   }

@@ -367,41 +367,15 @@ class SettingsScreen extends StatelessWidget {
               horizontal: Space.md,
               vertical: Space.sm,
             ),
-            child: Row(
-              children: [
-                for (final mode in [
-                  ThemeMode.light,
-                  ThemeMode.dark,
-                  ThemeMode.system,
-                ])
-                  Padding(
-                    padding: const EdgeInsets.only(right: Space.sm),
-                    child: ChoiceChip(
-                      // label colour must come from ThemeData: Material overrides inline style on selection
-                      label: Text(switch (mode) {
-                        ThemeMode.light => 'Paper',
-                        ThemeMode.dark => 'Night',
-                        _ => 'System',
-                      }),
-                      labelStyle: TextStyle(
-                        fontFamily: 'PlexMono',
-                        fontSize: 11,
-                        color: themeMode == mode ? c.paper : c.ink,
-                      ),
-                      selected: themeMode == mode,
-                      onSelected: (_) => onThemeChanged(mode),
-                      showCheckmark: false,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(Radii.row),
-                        side: BorderSide(
-                          color: themeMode == mode ? c.ink : c.rule,
-                        ),
-                      ),
-                      selectedColor: c.ink,
-                      backgroundColor: Colors.transparent,
-                    ),
-                  ),
+            child: SegmentedButton<ThemeMode>(
+              segments: const [
+                ButtonSegment(value: ThemeMode.light, label: Text('Paper')),
+                ButtonSegment(value: ThemeMode.dark, label: Text('Night')),
+                ButtonSegment(value: ThemeMode.system, label: Text('System')),
               ],
+              selected: {themeMode},
+              showSelectedIcon: false,
+              onSelectionChanged: (value) => onThemeChanged(value.first),
             ),
           ),
           _Section('Keyboard'),
@@ -624,7 +598,6 @@ Future<void> _confirmDisconnect(BuildContext context, AppState state) async {
   final yes = await showDialog<bool>(
     context: context,
     builder: (ctx) => AlertDialog(
-      backgroundColor: c.paper,
       title: Text('Disconnect?', style: nameStyle(ctx, size: 18)),
       content: Text(
         'Droves stops reading this bridge. Saved bridges and their tokens stay '
@@ -634,16 +607,13 @@ Future<void> _confirmDisconnect(BuildContext context, AppState state) async {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(ctx).pop(false),
-          child: Text(
-            'Keep connected',
-            style: monoStyle(ctx, size: 11, color: c.ink),
-          ),
+          child: const Text('Keep connected'),
         ),
         TextButton(
           onPressed: () => Navigator.of(ctx).pop(true),
           child: Text(
             'Disconnect',
-            style: monoStyle(ctx, size: 11, color: c.accent),
+            style: TextStyle(color: Theme.of(ctx).colorScheme.error),
           ),
         ),
       ],
@@ -727,14 +697,9 @@ class _ShortcutSettingsState extends State<_ShortcutSettings> {
   }
 
   Future<void> _edit() async {
-    final c = context.colors;
     final picked = await showModalBottomSheet<List<String>>(
       context: context,
-      backgroundColor: c.paper,
       isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(Radii.card)),
-      ),
       builder: (_) => KeyBarPickerSheet(selected: _ids),
     );
     if (picked == null || !mounted) return;

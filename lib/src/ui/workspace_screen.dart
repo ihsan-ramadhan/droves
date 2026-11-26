@@ -82,10 +82,6 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> with BridgeAccess {
     final c = context.colors;
     final action = await showModalBottomSheet<String>(
       context: context,
-      backgroundColor: c.paper,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(Radii.card)),
-      ),
       builder: (sheet) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -115,7 +111,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> with BridgeAccess {
                   style: monoStyle(
                     context,
                     size: 12.5,
-                    color: item.$2 == 'close' ? c.accent : c.ink,
+                    color: item.$2 == 'close'
+                        ? Theme.of(context).colorScheme.error
+                        : c.ink,
                   ),
                 ),
                 onTap: () => Navigator.of(sheet).pop(item.$2),
@@ -163,10 +161,6 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> with BridgeAccess {
     final c = context.colors;
     final action = await showModalBottomSheet<String>(
       context: context,
-      backgroundColor: c.paper,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(Radii.card)),
-      ),
       builder: (sheet) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -196,7 +190,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> with BridgeAccess {
                   style: monoStyle(
                     context,
                     size: 12.5,
-                    color: item.$2 == 'close' ? c.accent : c.ink,
+                    color: item.$2 == 'close'
+                        ? Theme.of(context).colorScheme.error
+                        : c.ink,
                   ),
                 ),
                 onTap: () => Navigator.of(sheet).pop(item.$2),
@@ -333,36 +329,40 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> with BridgeAccess {
               padding: const EdgeInsets.symmetric(horizontal: Space.md),
               itemCount: _tabs.length,
               separatorBuilder: (_, _) => const SizedBox(width: Space.sm),
-              itemBuilder: (_, i) {
-                final tab = _tabs[i];
-                final active = tab.tabId == _activeTab;
-                return Center(
-                  child: InkWell(
-                    onTap: () => setState(() => _activeTab = tab.tabId),
-                    onLongPress: () => _tabActions(tab),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: Space.md,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: active ? c.ink : Colors.transparent,
-                        borderRadius: BorderRadius.circular(Radii.row),
-                        border: Border.all(color: active ? c.ink : c.rule),
-                      ),
-                      child: Text(
-                        tab.label.isEmpty ? 'Tab ${tab.number}' : tab.label,
-                        style: monoStyle(
-                          context,
-                          size: 11,
-                          color: active ? c.paper : c.ink,
-                          weight: active ? FontWeight.w600 : FontWeight.w400,
-                        ),
+            itemBuilder: (_, i) {
+              final tab = _tabs[i];
+              final active = tab.tabId == _activeTab;
+              return Center(
+                child: InkWell(
+                  onTap: () => setState(() => _activeTab = tab.tabId),
+                  onLongPress: () => _tabActions(tab),
+                  borderRadius: BorderRadius.circular(Radii.lg),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: Space.md,
+                      vertical: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      color: active
+                          ? Theme.of(context).colorScheme.primaryContainer
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(Radii.lg),
+                    ),
+                    child: Text(
+                      tab.label.isEmpty ? 'Tab ${tab.number}' : tab.label,
+                      style: monoStyle(
+                        context,
+                        size: 11,
+                        color: active
+                            ? Theme.of(context).colorScheme.onPrimaryContainer
+                            : c.ink,
+                        weight: active ? FontWeight.w600 : FontWeight.w400,
                       ),
                     ),
                   ),
-                );
-              },
+                ),
+              );
+            },
             ),
           ),
         if (_tabs.length > 1) Container(height: 1, color: c.rule),
@@ -552,10 +552,6 @@ Future<String?> _promptText(BuildContext context, String title, String hint) {
   return showDialog<String>(
     context: context,
     builder: (dialog) => AlertDialog(
-      backgroundColor: c.paper,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(Radii.card),
-      ),
       title: Text(title, style: nameStyle(context, size: 17)),
       content: TextField(
         controller: controller,
@@ -577,17 +573,11 @@ Future<String?> _promptText(BuildContext context, String title, String hint) {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(dialog).pop(null),
-          child: Text(
-            'Cancel',
-            style: monoStyle(context, size: 12, color: c.muted),
-          ),
+          child: const Text('Cancel'),
         ),
         TextButton(
           onPressed: () => Navigator.of(dialog).pop(controller.text.trim()),
-          child: Text(
-            'Save',
-            style: monoStyle(context, size: 12, color: c.ink),
-          ),
+          child: const Text('Save'),
         ),
       ],
     ),
@@ -599,25 +589,18 @@ Future<bool?> _confirm(BuildContext context, String title, String body) {
   return showDialog<bool>(
     context: context,
     builder: (dialog) => AlertDialog(
-      backgroundColor: c.paper,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(Radii.card),
-      ),
       title: Text(title, style: nameStyle(context, size: 17)),
       content: Text(body, style: monoStyle(context, size: 12, color: c.muted)),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(dialog).pop(false),
-          child: Text(
-            'Keep',
-            style: monoStyle(context, size: 12, color: c.muted),
-          ),
+          child: const Text('Keep'),
         ),
         TextButton(
           onPressed: () => Navigator.of(dialog).pop(true),
           child: Text(
             'Close',
-            style: monoStyle(context, size: 12, color: c.accent),
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
           ),
         ),
       ],

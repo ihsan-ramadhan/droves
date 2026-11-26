@@ -72,7 +72,7 @@ class TallyRail extends StatelessWidget {
             margin: const EdgeInsets.only(right: 3),
             decoration: BoxDecoration(
               color: _markColor(c, w.agentStatus),
-              borderRadius: BorderRadius.circular(1),
+              borderRadius: BorderRadius.circular(Radii.xs),
             ),
           ),
       ],
@@ -93,7 +93,7 @@ class TallyRail extends StatelessWidget {
   }
 }
 
-/// static by design: MOTION 1 means no spinner
+/// status reads as a word, never a spinner; only the word itself crossfades
 class StatusWord extends StatelessWidget {
   const StatusWord(this.status, {super.key});
 
@@ -103,9 +103,15 @@ class StatusWord extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.colors;
     final waiting = status == 'blocked';
-    return LedgerLabel(
-      status == 'unknown' ? 'idle' : status,
-      color: waiting ? c.accent : null,
+    return AnimatedSwitcher(
+      duration: Motion.duration(context, Motion.medium),
+      switchInCurve: Curves.easeOut,
+      switchOutCurve: Curves.easeIn,
+      child: LedgerLabel(
+        key: ValueKey(status),
+        status == 'unknown' ? 'idle' : status,
+        color: waiting ? c.accent : null,
+      ),
     );
   }
 }
@@ -134,27 +140,23 @@ class DrovesScaffold extends StatelessWidget {
     return Scaffold(
       backgroundColor: c.paper,
       appBar: AppBar(
-        backgroundColor: c.paper,
-        surfaceTintColor: Colors.transparent,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        toolbarHeight: 52,
-        centerTitle: false,
         leading: leading,
-        titleSpacing: leading == null ? Space.md : 0,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text(title, style: nameStyle(context, size: 19)),
+            Text(
+              title,
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                color: c.ink,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
             ?subtitle,
           ],
         ),
         actions: actions,
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(1),
-          child: Container(height: 1, color: c.rule),
-        ),
       ),
       body: child,
       bottomNavigationBar: bottomBar,
@@ -261,12 +263,14 @@ class ScreenState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final reduced = Motion.reduced(context);
     // a screen that starts out loading must not promise progress while the
     // socket is down; only a dial in flight counts as work
     final connecting =
         AppScope.maybeOf(context)?.state == BridgeState.connecting;
+    Widget state = const SizedBox.shrink();
     if (loading && (connected || connecting)) {
-      return Column(
+      state = Column(
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(
@@ -304,7 +308,7 @@ class ScreenState extends StatelessWidget {
       );
     }
     if (!connected) {
-      return StateMessage(
+      state = StateMessage(
         headline: 'Bridge is not connected',
         body:
             'This screen will update once Droves reconnects. Check the '
@@ -316,8 +320,8 @@ class ScreenState extends StatelessWidget {
         ),
       );
     }
-    if (error != null) {
-      return StateMessage(
+    else if (error != null) {
+      state = StateMessage(
         headline: 'Could not read $subject',
         body: error!,
         icon: Icons.error_outline,
@@ -327,15 +331,24 @@ class ScreenState extends StatelessWidget {
         ),
       );
     }
-    if (empty) {
-      return StateMessage(
+    else if (empty) {
+      state = StateMessage(
         headline: emptyHeadline,
         body: emptyBody,
         icon: emptyIcon,
         action: emptyAction,
       );
     }
-    return const SizedBox.shrink();
+    return AnimatedSwitcher(
+      duration: Motion.duration(context, Motion.medium),
+      switchInCurve: Curves.easeOut,
+      switchOutCurve: Curves.easeIn,
+      transitionBuilder: (child, animation) {
+        if (reduced) return child;
+        return FadeTransition(opacity: animation, child: child);
+      },
+      child: KeyedSubtree(key: ValueKey(state.runtimeType), child: state),
+    );
   }
 }
 
@@ -495,13 +508,14 @@ class StagedChip extends StatelessWidget {
               style: monoStyle(context, size: 11),
             ),
           ),
-          InkWell(
-            onTap: onRemove,
-            borderRadius: BorderRadius.circular(Radii.row),
-            child: Padding(
-              padding: const EdgeInsets.all(3),
-              child: Icon(Icons.close, size: 13, color: c.muted),
-            ),
+          IconButton(
+            onPressed: onRemove,
+            tooltip: 'Remove $name',
+            iconSize: 18,
+            padding: const EdgeInsets.all(3),
+            constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+            color: c.muted,
+            icon: const Icon(Icons.close),
           ),
         ],
       ),

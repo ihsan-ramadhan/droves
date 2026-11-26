@@ -86,19 +86,10 @@ class _InboxScreenState extends State<InboxScreen> with BridgeAccess {
               onPressed: () => Navigator.of(
                 context,
               ).push(MaterialPageRoute(builder: (_) => const ConnectScreen())),
-              style: FilledButton.styleFrom(
-                backgroundColor: context.colors.ink,
-                foregroundColor: context.colors.paper,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(Radii.row),
-                ),
-              ),
               child: Text(
                 'Add bridge',
-                style: monoStyle(
-                  context,
-                  size: 12,
-                  color: context.colors.paper,
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  color: Theme.of(context).colorScheme.onPrimary,
                 ),
               ),
             ),
@@ -176,11 +167,13 @@ class _WorkspaceRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.colors;
     final waiting = workspace.agentStatus == 'blocked';
-    return InkWell(
+    return ListTile(
       onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: Space.md, vertical: 14),
-        child: Row(
+      contentPadding: const EdgeInsets.symmetric(
+        horizontal: Space.md,
+        vertical: 6,
+      ),
+      title: Row(
           children: [
             SizedBox(
               width: 26,
@@ -219,10 +212,16 @@ class _WorkspaceRow extends StatelessWidget {
             StatusWord(workspace.agentStatus),
             if (waiting) ...[
               const SizedBox(width: Space.sm),
-              Container(width: 6, height: 6, color: c.accent),
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primary,
+                  borderRadius: BorderRadius.circular(Radii.xs),
+                ),
+              ),
             ],
           ],
-        ),
       ),
     );
   }

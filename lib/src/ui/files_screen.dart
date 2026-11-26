@@ -143,12 +143,10 @@ class _FilesScreenState extends State<FilesScreen> with BridgeAccess {
   }
 
   Future<String?> _askName(String title, String hint) async {
-    final c = context.colors;
     final controller = TextEditingController();
     final name = await showDialog<String>(
       context: context,
       builder: (dialog) => AlertDialog(
-        backgroundColor: c.paper,
         title: Text(title, style: nameStyle(context, size: 17)),
         content: TextField(
           controller: controller,
@@ -213,7 +211,6 @@ class _FilesScreenState extends State<FilesScreen> with BridgeAccess {
     final c = context.colors;
     final action = await showModalBottomSheet<String>(
       context: context,
-      backgroundColor: c.paper,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(Radii.card)),
       ),
@@ -263,7 +260,6 @@ class _FilesScreenState extends State<FilesScreen> with BridgeAccess {
     final ok = await showDialog<bool>(
       context: context,
       builder: (dialog) => AlertDialog(
-        backgroundColor: c.paper,
         title: Text('Delete ${e.name}?', style: nameStyle(context, size: 17)),
         content: Text(
           e.isDir
@@ -549,7 +545,6 @@ class _FileScreenState extends State<FileScreen> with BridgeAccess {
     final discard = await showDialog<bool>(
       context: context,
       builder: (dialog) => AlertDialog(
-        backgroundColor: c.paper,
         title: Text('Discard changes?', style: nameStyle(context, size: 17)),
         content: Text(
           '${widget.name} has unsaved edits.',
