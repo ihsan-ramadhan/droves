@@ -252,14 +252,9 @@ class _TerminalScreenState extends State<TerminalScreen> {
     _focus.requestFocus();
   }
 
-  /// sticky modifiers latch for one printable character, then clear
+  /// latched modifiers prefix every typed character until tapped off
   String _applyModifiers(String data) {
-    final out = applyStickyModifiers(_latched, data);
-    if (_latched.isNotEmpty && data.length == 1) {
-      _latched.clear();
-      if (mounted) setState(() {});
-    }
-    return out;
+    return applyStickyModifiers(_latched, data);
   }
 
   Future<void> _toggleKeyBar() async {
@@ -271,11 +266,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
   Future<void> _configureKeys() async {
     final picked = await showModalBottomSheet<List<String>>(
       context: context,
-      backgroundColor: context.colors.paper,
       isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(Radii.card)),
-      ),
       builder: (_) => KeyBarPickerSheet(selected: _keyIds),
     );
     if (picked == null) return;

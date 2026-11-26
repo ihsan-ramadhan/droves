@@ -45,7 +45,7 @@ class KeyBar extends StatelessWidget {
                   return _BarButton(
                     label: key.label,
                     tooltip: key.sticky
-                        ? 'Toggle ${key.label} for the next key'
+                        ? 'Toggle ${key.label} on or off'
                         : 'Send ${key.label}',
                     active: active.contains(key.id),
                     onTap: () => onKey(key),

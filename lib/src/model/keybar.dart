@@ -23,7 +23,7 @@ class TerminalKey {
   /// grouping in the picker
   final String group;
 
-  /// sticky modifiers latch onto the next typed character instead of sending
+  /// sticky modifiers toggle on and prefix typed input until tapped off
   final bool sticky;
 }
 
@@ -78,7 +78,7 @@ const defaultKeyIds = <String>[
 ];
 
 /// single typed character only; paste and control keys pass through untouched.
-/// the caller clears the latch.
+/// the latch stays on, so the caller owns when it clears.
 String applyStickyModifiers(Set<String> modifiers, String data) {
   if (modifiers.isEmpty || data.length != 1) return data;
   final unit = data.codeUnitAt(0);
