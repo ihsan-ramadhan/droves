@@ -93,6 +93,54 @@ String applyStickyModifiers(Set<String> modifiers, String data) {
   return out;
 }
 
+/// xterm encodes held modifiers as a parameter, so Ctrl+Left is one sequence
+/// and the terminal can tell it apart from a bare Left.
+const _cursorFinal = <String, String>{
+  'up': 'A',
+  'down': 'B',
+  'right': 'C',
+  'left': 'D',
+  'home': 'H',
+  'end': 'F',
+};
+
+const _tildeDigits = <String, String>{
+  'pgup': '5',
+  'pgdn': '6',
+  'delete': '3',
+};
+
+/// 1 + shift(1) + alt(2) + ctrl(4), the xterm modifier parameter
+String _modifierParam(Set<String> modifiers) {
+  var param = 1;
+  if (modifiers.contains('shift')) param += 1;
+  if (modifiers.contains('alt')) param += 2;
+  if (modifiers.contains('ctrl')) param += 4;
+  return '$param';
+}
+
+/// one bar key with the latched modifiers folded in, matching a real keyboard
+String applyModifiersToKey(Set<String> modifiers, TerminalKey key) {
+  if (modifiers.isEmpty) return key.sequence;
+  final finalByte = _cursorFinal[key.id];
+  if (finalByte != null) {
+    return '\x1b[1;${_modifierParam(modifiers)}$finalByte';
+  }
+  final tilde = _tildeDigits[key.id];
+  if (tilde != null) {
+    return '\x1b[$tilde;${_modifierParam(modifiers)}~';
+  }
+  if (key.id == 'tab') {
+    // shift+tab is the reverse-tab key; ctrl and alt have no tab sequence
+    if (modifiers.length == 1 && modifiers.contains('shift')) return '\x1b[Z';
+    return key.sequence;
+  }
+  if (key.sequence.length == 1) {
+    return applyStickyModifiers(modifiers, key.sequence);
+  }
+  return key.sequence;
+}
+
 TerminalKey? keyById(String id) {
   for (final key in terminalKeyCatalog) {
     if (key.id == id) return key;

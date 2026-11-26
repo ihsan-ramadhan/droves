@@ -248,7 +248,8 @@ class _TerminalScreenState extends State<TerminalScreen> {
       _focus.requestFocus();
       return;
     }
-    _bridge.input(widget.pane.terminalId, key.sequence).catchError((_) {});
+    final sequence = applyModifiersToKey(_latched, key);
+    _bridge.input(widget.pane.terminalId, sequence).catchError((_) {});
     _focus.requestFocus();
   }
 

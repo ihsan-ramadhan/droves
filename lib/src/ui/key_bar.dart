@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:material_ui/material_ui.dart';
 
 import '../model/keybar.dart';
@@ -67,7 +69,7 @@ class KeyBar extends StatelessWidget {
   }
 }
 
-class _BarButton extends StatelessWidget {
+class _BarButton extends StatefulWidget {
   const _BarButton({
     this.label,
     this.icon,
@@ -83,10 +85,40 @@ class _BarButton extends StatelessWidget {
   final bool active;
 
   @override
+  State<_BarButton> createState() => _BarButtonState();
+}
+
+class _BarButtonState extends State<_BarButton> {
+  // a tap lasts a few frames; hold the highlight long enough to be seen
+  bool _pressed = false;
+  Timer? _release;
+
+  @override
+  void dispose() {
+    _release?.cancel();
+    super.dispose();
+  }
+
+  void _hold(bool pressed) {
+    _release?.cancel();
+    if (pressed) {
+      if (!_pressed) setState(() => _pressed = true);
+      return;
+    }
+    _release = Timer(const Duration(milliseconds: 120), () {
+      if (mounted) setState(() => _pressed = false);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final c = context.colors;
+    final filled = widget.active || _pressed;
     final child = InkWell(
-      onTap: onTap,
+      onTap: widget.onTap,
+      onTapDown: (_) => _hold(true),
+      onTapUp: (_) => _hold(false),
+      onTapCancel: () => _hold(false),
       borderRadius: BorderRadius.circular(Radii.row),
       child: Container(
         constraints: const BoxConstraints(minWidth: 44),
@@ -94,23 +126,25 @@ class _BarButton extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 10),
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: active ? c.ink : c.paper,
-          border: Border.all(color: active ? c.ink : c.rule),
+          color: filled ? c.ink : c.paper,
+          border: Border.all(color: filled ? c.ink : c.rule),
           borderRadius: BorderRadius.circular(Radii.row),
         ),
-        child: icon != null
-            ? Icon(icon, size: 16, color: active ? c.paper : c.muted)
+        child: widget.icon != null
+            ? Icon(widget.icon, size: 16, color: filled ? c.paper : c.muted)
             : Text(
-                label!,
+                widget.label!,
                 style: monoStyle(
                   context,
                   size: 12,
-                  color: active ? c.paper : c.ink,
+                  color: filled ? c.paper : c.ink,
                 ),
               ),
       ),
     );
-    return tooltip == null ? child : Tooltip(message: tooltip!, child: child);
+    return widget.tooltip == null
+        ? child
+        : Tooltip(message: widget.tooltip!, child: child);
   }
 }
 
