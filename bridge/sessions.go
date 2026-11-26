@@ -73,8 +73,13 @@ func (t *Transcripts) sessionPath(ctx context.Context, s *Server, p map[string]a
 		}
 	}
 	// jcode's herdr hook reports no session ref, so derive it from the cwd
-	if name == "jcode" && ref.Value == "" {
+	if name == "jcode" {
 		cwd := firstNonEmpty(agent.ForegroundCwd, agent.Cwd)
+		if id := firstNonEmpty(ref.Value, jcodePaneSessionID(ctx, s, pane.PaneID)); id != "" {
+			if path := jcodeSessionPath(id); path != "" {
+				return path, name, nil
+			}
+		}
 		if path := recentJcodeSession(cwd); path != "" {
 			return path, name, nil
 		}
@@ -100,18 +105,28 @@ func (t *Transcripts) load(ctx context.Context, s *Server, p map[string]any) (*t
 	if err != nil {
 		return nil, err
 	}
+	// the jcode checkpoint lags its journal, so both decide freshness
+	size, modTime := st.Size(), st.ModTime()
+	if journal := jcodeJournalPath(path); journal != "" {
+		if jst, jerr := os.Stat(journal); jerr == nil {
+			size += jst.Size()
+			if jst.ModTime().After(modTime) {
+				modTime = jst.ModTime()
+			}
+		}
+	}
 	t.mu.Lock()
 	cached := t.files[path]
 	t.mu.Unlock()
-	if cached != nil && cached.size == st.Size() && cached.modTime.Equal(st.ModTime()) {
+	if cached != nil && cached.size == size && cached.modTime.Equal(modTime) {
 		return cached, nil
 	}
 	parsed, err := parseTranscript(path, agent)
 	if err != nil {
 		return nil, err
 	}
-	parsed.size = st.Size()
-	parsed.modTime = st.ModTime()
+	parsed.size = size
+	parsed.modTime = modTime
 	t.mu.Lock()
 	t.files[path] = parsed
 	t.mu.Unlock()
@@ -167,20 +182,20 @@ func (t *Transcripts) Session(ctx context.Context, s *Server, p map[string]any) 
 }
 
 func parseTranscript(path, agent string) (*transcriptFile, error) {
+	name := normalizeAgentName(agent)
+	if name == "jcode" {
+		return parseJcodeTranscript(path, &transcriptFile{full: make(map[string]string)})
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
 	out := &transcriptFile{full: make(map[string]string)}
-	name := normalizeAgentName(agent)
 	if name == "codex" {
 		// codex needs a pre-scan for event_msg/response_item dedup;
 		// handled by a dedicated two-pass parser
 		return parseCodexTranscript(f, out)
-	}
-	if name == "jcode" {
-		return parseJcodeTranscript(f, out)
 	}
 	parse := recordParserFor(name)
 	sc := bufio.NewScanner(f)

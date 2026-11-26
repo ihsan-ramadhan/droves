@@ -142,7 +142,10 @@ func resolveSessionFile(agent, id, cwd string) string {
 	case "omp":
 		return resolveOmpSession(id)
 	case "jcode":
-		return recentJcodeSession(id)
+		if path := jcodeSessionPath(id); path != "" {
+			return path
+		}
+		return recentJcodeSession(cwd)
 	}
 	return ""
 }
