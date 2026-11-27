@@ -1,5 +1,5 @@
 id: droves-android
-name: "Droves 0.1.2 — Android native (emulator)"
+name: "Droves 0.1.3 — Android native (emulator)"
 platform: android
 domain: _default
 environment:
