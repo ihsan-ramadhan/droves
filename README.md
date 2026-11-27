@@ -26,8 +26,8 @@ the web build. See [Bridge contract](docs/bridge.md) for the RPC surface.
 
 | Area | What you get |
 | --- | --- |
-| Inbox | Workspaces with waiting-agent tally, agent status and quick open |
-| Agents | Agents known to the bridge, grouped by host |
+| Inbox | Workspaces banded Working, Done, Idle, with a waiting-agent tally and quick open |
+| Agents | Agents banded by status, each with host, session age and quick open |
 | Terminal | ANSI frames, scrollback, shortcuts, paste; split, zoom, rename and close panes |
 | Chat | Transcript with tool calls, search, attachments and prompt sending |
 | Changes | Diffs, stage/unstage, pull, push, commit history and selected-file commits |
@@ -195,4 +195,4 @@ publishing are documented in [Release](docs/release.md).
 Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE). Bundled fonts are
 OFL-1.1; notices ship under Settings → Licenses. Droves bundles no herdr code.
 
-[Docs](docs/) · [Bridge contract](docs/bridge.md) · [Release](docs/release.md) · [Design](DESIGN.md)
+[Docs](docs/) · [Client](docs/client.md) · [Bridge contract](docs/bridge.md) · [Release](docs/release.md) · [Design](DESIGN.md)

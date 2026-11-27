@@ -5,6 +5,7 @@ import 'package:flutter/services.dart' show MethodChannel;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'bridge/bridge.dart';
+import 'bridge/decode.dart';
 import 'web_notify_stub.dart'
     if (dart.library.js_interop) 'web_notify_web.dart'
     as web_notify;
@@ -16,8 +17,8 @@ TaskNotice? noticeFromPayload(String? payload) {
     final decoded = jsonDecode(payload) as Map<String, dynamic>;
     return TaskNotice(
       kind: (decoded['kind'] as String?) ?? 'completed',
-      title: (decoded['title'] as String?) ?? '',
-      body: (decoded['body'] as String?) ?? '',
+      title: str(decoded['title']),
+      body: str(decoded['body']),
       agent: decoded['agent'] as String?,
       workspaceId: decoded['workspaceId'] as String?,
       tabId: decoded['tabId'] as String?,

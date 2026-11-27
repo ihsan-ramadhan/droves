@@ -18,15 +18,17 @@ import 'src/notifications.dart';
 import 'src/platform_web_stub.dart'
     if (dart.library.js_interop) 'src/platform_web.dart'
     as platform;
+import 'src/bridge/bridge.dart';
 import 'src/theme/tokens.dart';
 import 'src/ui/agents_screen.dart';
 import 'src/ui/chat_screen.dart';
+import 'src/ui/common/scaffold.dart';
+import 'src/ui/common/state_message.dart';
+import 'src/ui/dialogs.dart';
 import 'src/ui/git_screen.dart';
 import 'src/ui/inbox_screen.dart';
 import 'src/ui/scout_screen.dart';
-import 'src/ui/widgets.dart';
 import 'src/updates.dart';
-import 'src/bridge/bridge.dart';
 
 bool shouldNotify(
   TaskNotice notice, {
@@ -295,29 +297,14 @@ class _ShellState extends State<Shell> {
         await s.setNotificationsEnabled(false);
         return;
       }
-      final allow = await showDialog<bool>(
-        context: context,
-        builder: (dialog) => AlertDialog(
-          title: Text(
-            'Turn on notifications?',
-            style: nameStyle(context, size: 18),
-          ),
-          content: Text(
+      final allow = await confirmDialog(
+        context,
+        title: 'Turn on notifications?',
+        body:
             'Get one alert when an agent finishes or needs your input, even '
             'when this tab is in the background.',
-            style: monoStyle(context, size: 12, color: context.colors.muted),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialog).pop(false),
-              child: const Text('Not now'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(dialog).pop(true),
-              child: const Text('Allow'),
-            ),
-          ],
-        ),
+        cancelLabel: 'Not now',
+        confirmLabel: 'Allow',
       );
       if (allow != true) {
         await s.setNotificationsEnabled(false);
@@ -445,14 +432,22 @@ class _ChangesGate extends StatefulWidget {
 class _ChangesGateState extends State<_ChangesGate> {
   Future<List<WorkspaceInfo>>? _future;
   bool _reloading = false;
+  Bridge? _bound;
+  bool _wasReady = false;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final bridge = AppScope.of(context).bridge;
-    if (bridge != null && _future == null) {
-      _future = bridge.workspaces();
+    final app = AppScope.of(context);
+    final bridge = app.bridge;
+    final ready = bridge != null && app.state == BridgeState.ready;
+    // a bridge that dropped and came back still has a stale failed future;
+    // reading workspaces again on the transition is what clears it
+    if (!identical(bridge, _bound) || (ready && !_wasReady)) {
+      _bound = bridge;
+      _future = ready ? bridge.workspaces() : null;
     }
+    _wasReady = ready;
   }
 
   Future<void> _reload() async {
@@ -482,17 +477,28 @@ class _ChangesGateState extends State<_ChangesGate> {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
+    final state = AppScope.of(context);
+    // every other tab hands a dead bridge to the same widget, so Changes must
+    // not invent its own "could not read" wording while the bridge is down
+    if (state.bridge == null || state.state != BridgeState.ready) {
+      final status = connectionSubtitle(context, null);
+      return DrovesScaffold(
+        title: 'Changes',
+        subtitle: LedgerLabel(status.isEmpty ? 'not connected' : status),
+        child: Center(child: BridgeDownState(onRetry: _reload)),
+      );
+    }
     final future = _future;
     if (future == null) {
       return DrovesScaffold(
         title: 'Changes',
-        subtitle: const LedgerLabel('no bridge connected'),
+        subtitle: const LedgerLabel('reading workspaces'),
         child: ScreenState(
-          loading: false,
+          loading: true,
           error: null,
-          connected: false,
+          connected: true,
           empty: false,
-          subject: 'changes',
+          subject: 'workspaces',
           emptyHeadline: '',
           emptyBody: '',
           onRetry: _reload,

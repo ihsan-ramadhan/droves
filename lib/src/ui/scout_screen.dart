@@ -4,33 +4,14 @@ import 'package:file_picker/file_picker.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../bridge/bridge.dart';
+import '../bridge/decode.dart';
+import '../model/scout_model.dart';
 import '../theme/tokens.dart';
-import 'widgets.dart';
-
-class ScoutModel {
-  ScoutModel({
-    required this.cli,
-    required this.provider,
-    required this.id,
-    required this.label,
-    required this.thinkingLevels,
-  });
-
-  final String cli;
-  final String provider;
-  final String id;
-  final String label;
-  final List<String> thinkingLevels;
-
-  factory ScoutModel.fromJson(Map<String, dynamic> j) => ScoutModel(
-    cli: (j['cli'] as String?) ?? 'omp',
-    provider: (j['provider'] as String?) ?? '',
-    id: (j['id'] as String?) ?? '',
-    label: (j['label'] as String?) ?? (j['id'] as String? ?? ''),
-    thinkingLevels: ((j['thinking_levels'] as List?) ?? const [])
-        .cast<String>(),
-  );
-}
+import 'common/bridge_access.dart';
+import 'common/scaffold.dart';
+import 'common/state_message.dart';
+import 'dialogs.dart';
+import 'screen_loader.dart';
 
 class ScoutMessage {
   ScoutMessage({required this.role, required this.text});
@@ -47,7 +28,8 @@ class ScoutScreen extends StatefulWidget {
   State<ScoutScreen> createState() => _ScoutScreenState();
 }
 
-class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
+class _ScoutScreenState extends State<ScoutScreen>
+    with BridgeAccess, ScreenLoader {
   final _input = TextEditingController();
   final _search = TextEditingController();
   final _searchFocus = FocusNode();
@@ -64,10 +46,8 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
   List<Map<String, dynamic>> _sessions = const [];
   Map<String, dynamic> _config = const {};
   String? _sessionId;
-  bool _loading = true;
   bool _sending = false;
   bool _running = false;
-  String? _error;
   StreamSubscription<Map<String, dynamic>>? _sub;
 
   @override
@@ -98,43 +78,32 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
           (snapshot['config'] as Map?)?.cast<String, dynamic>() ?? _config;
       _sessionId = snapshot['session_id'] as String? ?? _sessionId;
       _running = snapshot['running'] == true;
-      _sessions = ((snapshot['sessions'] as List?) ?? const [])
-          .cast<Map<String, dynamic>>();
-      final raw = ((snapshot['messages'] as List?) ?? const [])
-          .cast<Map<String, dynamic>>();
+      _sessions = maps(snapshot['sessions']);
+      final raw = maps(snapshot['messages']);
       _messages = raw
           .map(
             (m) => ScoutMessage(
               role: (m['role'] as String?) ?? 'assistant',
-              text: (m['text'] as String?) ?? '',
+              text: str(m['text']),
             ),
           )
           .where((m) => m.text.isNotEmpty)
           .toList();
       if (_search.text.trim().isNotEmpty) _searchIndex = 0;
-      _loading = false;
-      _error = null;
+      loading = false;
+      error = null;
     });
   }
 
   Future<void> _load() async {
-    try {
+    await load(() async {
       final r = await bridge.call('bridge.assistant.get');
       if (!mounted) return;
       setState(() {
-        _models = ((r['models'] as List?) ?? const [])
-            .cast<Map<String, dynamic>>()
-            .map(ScoutModel.fromJson)
-            .toList();
+        _models = maps(r['models']).map(ScoutModel.fromJson).toList();
       });
       _apply(r);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = e.toString();
-      });
-    }
+    });
   }
 
   @override
@@ -152,8 +121,7 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
       final r = await bridge.call('workspace.list');
       if (!mounted) return;
       setState(() {
-        _workspaces = ((r['workspaces'] as List?) ?? const [])
-            .cast<Map<String, dynamic>>();
+        _workspaces = maps(r['workspaces']);
       });
     } catch (_) {
       // picker stays empty with a hint if herdr isn't reachable
@@ -164,7 +132,7 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
     if (_workspaces.isEmpty) await _loadWorkspaces();
     if (!mounted) return;
     final c = context.colors;
-    final allowed = ((_config['allowed_workspaces'] as List?) ?? const [])
+    final allowed = (_config['allowed_workspaces'] as List? ?? const [])
         .whereType<Map>()
         .map((m) => m['workspace_id'])
         .toSet();
@@ -236,7 +204,7 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
         )
         .toList();
     if (ordered.isEmpty) {
-      _toast('Keep at least one workspace selected');
+      showToast(context, 'Keep at least one workspace selected');
       return;
     }
     try {
@@ -249,7 +217,7 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
       });
       await _load();
     } catch (e) {
-      if (mounted) _toast('Could not save: $e');
+      if (mounted) showError(context, e);
     }
   }
 
@@ -263,7 +231,7 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
       if (!mounted) return;
       setState(() => _staged.add(staged));
     } catch (e) {
-      if (mounted) _toast('Could not attach: $e');
+      if (mounted) showError(context, e);
     } finally {
       if (mounted) setState(() => _uploading = false);
     }
@@ -274,7 +242,7 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
     try {
       await bridge.call('bridge.assistant.stop', {'session_id': _sessionId});
     } catch (e) {
-      if (mounted) _toast('Could not stop: $e');
+      if (mounted) showError(context, e);
     }
   }
 
@@ -330,13 +298,6 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
     });
   }
 
-  void _toast(String message) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message, style: monoStyle(context, size: 12))),
-    );
-  }
-
   Future<void> _pickModel() async {
     final c = context.colors;
     // hoisted out of the sheet builder: keyboard open/close rebuilds the
@@ -390,7 +351,7 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
                       dense: true,
                       leading: Icon(Icons.link, size: 18, color: c.muted),
                       title: Text(
-                        'Custom endpoint',
+                        'Custom server',
                         style: monoStyle(context, size: 12.5),
                       ),
                       subtitle: Text(
@@ -402,7 +363,7 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
                           cli: 'openai',
                           provider: 'custom',
                           id: '',
-                          label: 'Custom endpoint',
+                          label: 'Custom server',
                           thinkingLevels: const [],
                         ),
                       ),
@@ -467,11 +428,7 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
       await _load();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(e.toString(), style: monoStyle(context, size: 12)),
-        ),
-      );
+      showError(context, e);
     }
   }
 
@@ -484,37 +441,61 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
     final saved = await showDialog<bool>(
       context: context,
       builder: (dialog) => AlertDialog(
-        title: Text('Custom endpoint', style: nameStyle(context, size: 16)),
+        title: Text('Custom server', style: nameStyle(context, size: 17)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
               controller: baseUrl,
-              style: monoStyle(context, size: 12),
+              style: monoStyle(context, size: 13),
               decoration: InputDecoration(
                 labelText: 'Base URL',
                 hintText: 'https://your-endpoint.example.com/v1',
-                hintStyle: monoStyle(context, size: 11, color: c.muted),
+                hintStyle: monoStyle(context, size: 12, color: c.muted),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(Radii.row),
+                  borderSide: BorderSide(color: c.rule),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(Radii.row),
+                  borderSide: BorderSide(color: c.ink, width: 1.5),
+                ),
               ),
             ),
             const SizedBox(height: Space.sm),
             TextField(
               controller: apiKey,
-              style: monoStyle(context, size: 12),
+              style: monoStyle(context, size: 13),
               obscureText: true,
               decoration: InputDecoration(
                 labelText: 'API key (optional)',
-                hintStyle: monoStyle(context, size: 11, color: c.muted),
+                hintStyle: monoStyle(context, size: 12, color: c.muted),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(Radii.row),
+                  borderSide: BorderSide(color: c.rule),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(Radii.row),
+                  borderSide: BorderSide(color: c.ink, width: 1.5),
+                ),
               ),
             ),
             const SizedBox(height: Space.sm),
             TextField(
               controller: model,
-              style: monoStyle(context, size: 12),
+              style: monoStyle(context, size: 13),
               decoration: InputDecoration(
                 labelText: 'Model',
                 hintText: 'model-name',
-                hintStyle: monoStyle(context, size: 11, color: c.muted),
+                hintStyle: monoStyle(context, size: 12, color: c.muted),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(Radii.row),
+                  borderSide: BorderSide(color: c.rule),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(Radii.row),
+                  borderSide: BorderSide(color: c.ink, width: 1.5),
+                ),
               ),
             ),
           ],
@@ -522,11 +503,17 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialog).pop(false),
-            child: Text('Cancel', style: monoStyle(context, size: 12)),
+            child: Text(
+              'Cancel',
+              style: monoStyle(context, size: 12, color: c.muted),
+            ),
           ),
           TextButton(
             onPressed: () => Navigator.of(dialog).pop(true),
-            child: Text('Save', style: monoStyle(context, size: 12)),
+            child: Text(
+              'Save',
+              style: monoStyle(context, size: 12, color: c.ink),
+            ),
           ),
         ],
       ),
@@ -557,48 +544,27 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
       await _load();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(e.toString(), style: monoStyle(context, size: 12)),
-        ),
-      );
+      showError(context, e);
     }
   }
 
   Future<void> _confirmDeleteSession(Map<String, dynamic> session) async {
-    final c = context.colors;
-    final title = (session['title'] as String?) ?? 'Chat';
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (dialog) => AlertDialog(
-        title: Text('Delete chat?', style: nameStyle(context, size: 16)),
-        content: Text(
-          '"$title" and its messages will be removed. This cannot be undone.',
-          style: monoStyle(context, size: 12, color: c.ink),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialog).pop(false),
-            child: Text('Cancel', style: monoStyle(context, size: 12)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(dialog).pop(true),
-            child: Text(
-              'Delete',
-              style: monoStyle(context, size: 12, color: c.error),
-            ),
-          ),
-        ],
-      ),
+    final title = str(session['title'], 'Chat');
+    final ok = await confirmDialog(
+      context,
+      title: 'Delete chat?',
+      body: '"$title" and its messages will be removed. This cannot be undone.',
+      confirmLabel: 'Delete',
+      destructive: true,
     );
-    if (ok != true || !mounted) return;
+    if (!ok || !mounted) return;
     try {
       await bridge.call('bridge.assistant.delete_session', {
         'session_id': session['id'],
       });
       await _load();
     } catch (e) {
-      if (mounted) _toast('Could not delete: $e');
+      if (mounted) showError(context, e);
     }
   }
 
@@ -607,8 +573,8 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
     final paths = _staged.map((s) => s.path).join(' ');
     final text = [typed, paths].where((s) => s.isNotEmpty).join(' ');
     if (text.isEmpty || _sending) return;
-    final provider = (_config['provider'] as String?) ?? '';
-    final model = (_config['model'] as String?) ?? '';
+    final provider = str(_config['provider']);
+    final model = str(_config['model']);
     if (provider.isEmpty || model.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -623,7 +589,7 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
     setState(() => _sending = true);
     try {
       // the bridge rejects sends outside the authorized scope; take it from the saved config
-      final scope = ((_config['allowed_workspaces'] as List?) ?? const [])
+      final scope = (_config['allowed_workspaces'] as List? ?? const [])
           .whereType<Map>()
           .map(
             (ref) => {
@@ -643,11 +609,7 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
       await _load();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(e.toString(), style: monoStyle(context, size: 12)),
-        ),
-      );
+      showError(context, e);
     } finally {
       if (mounted) setState(() => _sending = false);
     }
@@ -656,9 +618,10 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    final model = (_config['model'] as String?) ?? '';
-    final provider = (_config['provider'] as String?) ?? '';
-    final status = connectionSubtitle(context, _error);
+    final connected = app.connected;
+    final model = str(_config['model']);
+    final provider = str(_config['provider']);
+    final status = connectionSubtitle(context, error);
     return DrovesScaffold(
       title: 'Scout',
       subtitle: Row(
@@ -679,41 +642,44 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
         ],
       ),
       actions: [
-        IconButton(
-          icon: Icon(
-            Icons.search,
-            size: 20,
-            color: _searching ? c.accent : c.ink,
+        if (connected) ...[
+          RefreshButton(busy: loading, onPressed: _load),
+          IconButton(
+            icon: Icon(
+              Icons.search,
+              size: 20,
+              color: _searching ? c.accent : c.ink,
+            ),
+            tooltip: _searching ? 'Close search' : 'Search conversation',
+            onPressed: _toggleSearch,
           ),
-          tooltip: _searching ? 'Close search' : 'Search conversation',
-          onPressed: _toggleSearch,
-        ),
-        IconButton(
-          icon: const Icon(Icons.folder_open, size: 20),
-          color: c.ink,
-          tooltip: 'Allowed workspaces',
-          onPressed: _pickWorkspaces,
-        ),
-        IconButton(
-          icon: const Icon(Icons.tune, size: 20),
-          color: c.ink,
-          tooltip: 'Pick model',
-          onPressed: _pickModel,
-        ),
-        IconButton(
-          icon: const Icon(Icons.add, size: 20),
-          color: c.ink,
-          tooltip: 'New chat',
-          onPressed: () async {
-            await bridge.call('bridge.assistant.new_session', {});
-            await _load();
-          },
-        ),
+          IconButton(
+            icon: const Icon(Icons.folder_open, size: 20),
+            color: c.ink,
+            tooltip: 'Allowed workspaces',
+            onPressed: _pickWorkspaces,
+          ),
+          IconButton(
+            icon: const Icon(Icons.tune, size: 20),
+            color: c.ink,
+            tooltip: 'Pick model',
+            onPressed: _pickModel,
+          ),
+          IconButton(
+            icon: const Icon(Icons.add, size: 20),
+            color: c.ink,
+            tooltip: 'New chat',
+            onPressed: () async {
+              await bridge.call('bridge.assistant.new_session', {});
+              await _load();
+            },
+          ),
+        ],
       ],
       child: Column(
         children: [
-          if (_searching) _searchBar(context),
-          if (_sessions.length > 1)
+          if (connected && _searching) _searchBar(context),
+          if (connected && _sessions.length > 1)
             SizedBox(
               height: 40,
               child: ListView.separated(
@@ -761,7 +727,7 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
               ),
             ),
           Expanded(child: _buildBody(context)),
-          _composer(context),
+          if (connected) _composer(context),
         ],
       ),
     );
@@ -829,11 +795,10 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
 
   Widget _buildBody(BuildContext context) {
     final c = context.colors;
-    final live = app.bridge;
-    final connected = live != null && live.state == BridgeState.ready;
+    final connected = app.connected;
     final state = ScreenState(
-      loading: _loading,
-      error: _error,
+      loading: loading && _messages.isEmpty,
+      error: error,
       connected: connected,
       empty: _messages.isEmpty,
       subject: 'Scout',
@@ -850,7 +815,7 @@ class _ScoutScreenState extends State<ScoutScreen> with BridgeAccess {
         child: Text('Pick a model', style: monoStyle(context, size: 12)),
       ),
     );
-    if (_loading || !connected || _error != null || _messages.isEmpty) {
+    if (loading || !connected || error != null || _messages.isEmpty) {
       return state;
     }
     return ListView.separated(
@@ -1043,7 +1008,7 @@ class _WorkspacePickerSheetState extends State<_WorkspacePickerSheet> {
         final w = widget.workspaces[i];
         final id = w['workspace_id'];
         final label = (w['label'] as String?) ?? (id as String? ?? '?');
-        final root = (w['cwd'] as String?) ?? '';
+        final root = str(w['cwd']);
         return CheckboxListTile(
           dense: true,
           value: _selected.contains(id),

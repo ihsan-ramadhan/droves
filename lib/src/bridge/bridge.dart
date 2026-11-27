@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import 'decode.dart';
 import 'socket.dart';
 
 /// a terminal pane as the bridge reports it
@@ -84,10 +85,10 @@ class WorkspaceInfo {
 
   factory WorkspaceInfo.fromJson(Map<String, dynamic> j) => WorkspaceInfo(
     workspaceId: j['workspace_id'] as String,
-    label: (j['label'] as String?) ?? '',
-    number: (j['number'] as num?)?.toInt() ?? 0,
-    paneCount: (j['pane_count'] as num?)?.toInt() ?? 0,
-    tabCount: (j['tab_count'] as num?)?.toInt() ?? 0,
+    label: str(j['label']),
+    number: integer(j['number']) ?? 0,
+    paneCount: integer(j['pane_count']) ?? 0,
+    tabCount: integer(j['tab_count']) ?? 0,
     agentStatus: (j['agent_status'] as String?) ?? 'unknown',
     cwd: j['cwd'] as String?,
     activeTabId: j['active_tab_id'] as String?,
@@ -114,14 +115,13 @@ class TabInfo {
   factory TabInfo.fromJson(Map<String, dynamic> j) => TabInfo(
     tabId: j['tab_id'] as String,
     workspaceId: j['workspace_id'] as String,
-    label: (j['label'] as String?) ?? '',
-    number: (j['number'] as num?)?.toInt() ?? 0,
-    paneCount: (j['pane_count'] as num?)?.toInt() ?? 0,
+    label: str(j['label']),
+    number: integer(j['number']) ?? 0,
+    paneCount: integer(j['pane_count']) ?? 0,
     agentStatus: (j['agent_status'] as String?) ?? 'unknown',
   );
 }
 
-/// one frame of terminal output pushed for an attached terminal
 class TerminalFrame {
   TerminalFrame({
     required this.terminalId,
@@ -136,11 +136,9 @@ class TerminalFrame {
   final int width;
   final int height;
 
-  /// whether the pane shares its tab with other panes
   final bool split;
   final bool full;
 
-  /// UTF-8 ANSI text, already decoded from the bridge's base64 payload.
   final String bytes;
 }
 
@@ -166,7 +164,6 @@ class Bridge {
   Stream<Map<String, dynamic>> get events => _events.stream;
   Stream<BridgeState> get stateStream => _state.stream;
 
-  /// agent finished/blocked and Scout task events, relayed while the app is open
   Stream<TaskNotice> get notices => _notices.stream;
 
   BridgeState _current = BridgeState.idle;
@@ -181,10 +178,9 @@ class Bridge {
     if (!_state.isClosed) _state.add(s);
   }
 
-  /// exchange the token once; the cookie scopes later calls to the bridge path
   Future<void> login(String password) async {
     final res = await http.post(
-      baseUrl.resolve('api/login'),
+      bridgeUri(baseUrl, 'api/login'),
       headers: {'content-type': 'application/json'},
       body: jsonEncode({'password': password}),
     );
@@ -192,14 +188,14 @@ class Bridge {
       throw BridgeError('Login rejected (${res.statusCode}). Check the token.');
     }
     if (kIsWeb) {
-      // browsers hide Set-Cookie from scripts; the sentinel only records login,
-      // the cookie jar attaches the real cookie to the same-origin WebSocket
       _cookie = 'browser-managed';
       return;
     }
     final cookies = res.headers['set-cookie'];
     if (cookies == null || cookies.isEmpty) {
-      throw BridgeError('Login succeeded but returned no session cookie.');
+      throw BridgeError(
+        'The bridge accepted the token but did not finish signing in.',
+      );
     }
     _cookie = cookies.split(';').first;
   }
@@ -214,10 +210,10 @@ class Bridge {
       _socket = null;
       _helloCompleter = null;
       if (_cookie == null) await login(password);
-      final wsUri = baseUrl.replace(
-        scheme: baseUrl.scheme == 'https' ? 'wss' : 'ws',
-        path: '${baseUrl.path}/ws',
-      );
+      final wsUri = bridgeUri(
+        baseUrl,
+        'ws',
+      ).replace(scheme: baseUrl.scheme == 'https' ? 'wss' : 'ws');
       final socket = connectBridgeSocket(wsUri, cookie: _cookie);
       _socket = socket;
       await socket.ready;
@@ -278,11 +274,7 @@ class Bridge {
       final title = data['title'] as String?;
       if (title != null) {
         _notices.add(
-          TaskNotice(
-            kind: 'scout',
-            title: title,
-            body: (data['body'] as String?) ?? '',
-          ),
+          TaskNotice(kind: 'scout', title: title, body: str(data['body'])),
         );
       }
       return;
@@ -296,8 +288,8 @@ class Bridge {
         _notices.add(
           TaskNotice(
             kind: (j['kind'] as String?) ?? 'completed',
-            title: (j['title'] as String?) ?? '',
-            body: (j['body'] as String?) ?? '',
+            title: str(j['title']),
+            body: str(j['body']),
             agent: j['agent'] as String?,
             workspaceId: j['workspace_id'] as String?,
             tabId: j['tab_id'] as String?,
@@ -370,7 +362,6 @@ class Bridge {
     }
   }
 
-  /// set by AppState; one shot, a fresh Bridge arms its own
   Future<void> Function()? _redial;
   set redial(Future<void> Function()? fn) => _redial = fn;
 
@@ -403,26 +394,17 @@ class Bridge {
 
   Future<List<WorkspaceInfo>> workspaces() async {
     final r = await call('workspace.list');
-    return ((r['workspaces'] as List?) ?? const [])
-        .cast<Map<String, dynamic>>()
-        .map(WorkspaceInfo.fromJson)
-        .toList();
+    return maps(r['workspaces']).map(WorkspaceInfo.fromJson).toList();
   }
 
   Future<List<TabInfo>> tabs(String workspaceId) async {
     final r = await call('tab.list', {'workspace_id': workspaceId});
-    return ((r['tabs'] as List?) ?? const [])
-        .cast<Map<String, dynamic>>()
-        .map(TabInfo.fromJson)
-        .toList();
+    return maps(r['tabs']).map(TabInfo.fromJson).toList();
   }
 
   Future<List<PaneInfo>> panes(String workspaceId) async {
     final r = await call('pane.list', {'workspace_id': workspaceId});
-    return ((r['panes'] as List?) ?? const [])
-        .cast<Map<String, dynamic>>()
-        .map(PaneInfo.fromJson)
-        .toList();
+    return maps(r['panes']).map(PaneInfo.fromJson).toList();
   }
 
   Future<({int offset, bool split, int cols, int rows})> attach(
@@ -436,10 +418,10 @@ class Bridge {
       'rows': rows,
     });
     return (
-      offset: (r['offset'] as num?)?.toInt() ?? 0,
+      offset: integer(r['offset']) ?? 0,
       split: r['split'] == true,
-      cols: (r['cols'] as num?)?.toInt() ?? 0,
-      rows: (r['rows'] as num?)?.toInt() ?? 0,
+      cols: integer(r['cols']) ?? 0,
+      rows: integer(r['rows']) ?? 0,
     );
   }
 
@@ -462,7 +444,6 @@ class Bridge {
     });
   }
 
-  /// server-side scrollback; returns the offset from the live tail
   Future<int> scroll(String terminalId, int lines, {required bool up}) async {
     final r = await call('terminal.scroll', {
       'terminal_id': terminalId,
@@ -470,14 +451,13 @@ class Bridge {
       'lines': lines.abs(),
       'source': 'wheel',
     });
-    return (r['offset'] as num?)?.toInt() ?? 0;
+    return integer(r['offset']) ?? 0;
   }
 
   Future<void> sendText(String paneId, String text) async {
     await call('pane.send_text', {'pane_id': paneId, 'text': text});
   }
 
-  /// `agent_history.get` drops reasoning by design; the trajectory is the only source
   Future<List<String>> sessionReasoning(
     String paneId,
     String workspaceId,
@@ -505,7 +485,6 @@ class Bridge {
     return out;
   }
 
-  /// `pane.send_text` only types; enter rides as its own key
   Future<void> sendPrompt(String paneId, String text) async {
     await call('pane.send_input', {
       'pane_id': paneId,
@@ -584,25 +563,23 @@ class Bridge {
     });
   }
 
-  /// provider-agnostic reachability facts for the connect/setup screens
   Future<Map<String, dynamic>> info() async {
-    final res = await http.get(baseUrl.resolve('api/info'));
+    final res = await http.get(bridgeUri(baseUrl, 'api/info'));
     if (res.statusCode != 200) {
-      throw BridgeError('Could not read bridge info (${res.statusCode})');
+      throw BridgeError('The bridge could not answer (${res.statusCode}).');
     }
     final decoded = jsonDecode(res.body);
     if (decoded is! Map<String, dynamic>) {
-      throw BridgeError('Bridge info was not an object');
+      throw BridgeError('The bridge sent something unreadable.');
     }
     return decoded;
   }
 
-  /// staged files live in the bridge's upload directory, not the workspace;
-  /// the bridge owns retention
   Future<StagedFile> upload(String filename, List<int> bytes) async {
-    final uri = baseUrl.replace(
-      path: '${baseUrl.path}/api/terminal-upload',
-      queryParameters: {'filename': filename},
+    final uri = bridgeUri(
+      baseUrl,
+      'api/terminal-upload',
+      query: {'filename': filename},
     );
     final res = await http.post(
       uri,
@@ -610,16 +587,16 @@ class Bridge {
       body: bytes,
     );
     if (res.statusCode != 200) {
-      throw BridgeError('Upload failed (${res.statusCode}): ${res.body}');
+      throw BridgeError('Could not attach the file (${res.statusCode}).');
     }
     final j = jsonDecode(res.body) as Map<String, dynamic>;
-    final path = (j['path'] as String?) ?? '';
-    if (path.isEmpty) throw BridgeError('Upload returned no path');
+    final path = str(j['path']);
+    if (path.isEmpty) {
+      throw BridgeError('The file went through with no location.');
+    }
     return StagedFile(path: path, name: filename, size: bytes.length);
   }
 
-  /// `pane.send_text` has no bracketed flag; write the escape markers directly
-  /// so multi-line paste lands in the command line, not as separate commands
   Future<void> paste(String terminalId, String text) async {
     await input(terminalId, '\x1b[200~$text\x1b[201~');
   }
@@ -636,7 +613,6 @@ class Bridge {
     if (filesystem) 'scope': 'filesystem',
   });
 
-  /// tool output is cut from the history snapshot; fetch it when a card opens
   Future<Map<String, dynamic>> historyEntry({
     required String entryId,
     required String paneId,
@@ -650,14 +626,14 @@ class Bridge {
   Future<Map<String, dynamic>> readFile(String workspaceId, String path) =>
       call('file.read', {'workspace_id': workspaceId, 'path': path});
 
-  /// writes go over HTTP only (`/api/file/upload`), creating or overwriting in place
   Future<void> writeFile(String workspaceId, String path, String text) async {
     final slash = path.lastIndexOf('/');
     final directory = slash > 0 ? path.substring(0, slash) : '';
     final filename = slash >= 0 ? path.substring(slash + 1) : path;
-    final uri = baseUrl.replace(
-      path: '${baseUrl.path}/api/file/upload',
-      queryParameters: {
+    final uri = bridgeUri(
+      baseUrl,
+      'api/file/upload',
+      query: {
         'workspace_id': workspaceId,
         'directory': directory,
         'filename': filename,
@@ -669,7 +645,7 @@ class Bridge {
       body: utf8.encode(text),
     );
     if (res.statusCode != 200) {
-      throw BridgeError('Save failed (${res.statusCode}): ${res.body}');
+      throw BridgeError('Could not save the file (${res.statusCode}).');
     }
   }
 
@@ -683,7 +659,6 @@ class Bridge {
     'name': name,
   });
 
-  /// `file.move` derives the name from the path; rename = move into the same directory
   Future<void> moveFile(String workspaceId, String path, String directory) =>
       call('file.move', {
         'workspace_id': workspaceId,
@@ -692,13 +667,14 @@ class Bridge {
       });
 
   Future<void> deleteFile(String workspaceId, String path) async {
-    final uri = baseUrl.replace(
-      path: '${baseUrl.path}/api/file/delete',
-      queryParameters: {'workspace_id': workspaceId, 'path': path},
+    final uri = bridgeUri(
+      baseUrl,
+      'api/file/delete',
+      query: {'workspace_id': workspaceId, 'path': path},
     );
     final res = await http.post(uri, headers: _authHeaders);
     if (res.statusCode != 200) {
-      throw BridgeError('Delete failed (${res.statusCode}): ${res.body}');
+      throw BridgeError('Could not delete it (${res.statusCode}).');
     }
   }
 
@@ -712,7 +688,6 @@ class Bridge {
   }
 }
 
-/// one relayed task event: agent finished/blocked or a Scout run
 class TaskNotice {
   TaskNotice({
     required this.kind,
@@ -724,7 +699,6 @@ class TaskNotice {
     this.paneId,
   });
 
-  /// `completed`, `blocked` or `scout`.
   final String kind;
   final String title;
   final String body;
@@ -734,7 +708,6 @@ class TaskNotice {
   final String? paneId;
 }
 
-/// a file staged on the bridge host; `path` is what the terminal or agent sees
 class StagedFile {
   StagedFile({required this.path, required this.name, required this.size});
 
@@ -743,11 +716,17 @@ class StagedFile {
   final int size;
 }
 
+Uri bridgeUri(Uri base, String route, {Map<String, String>? query}) {
+  final prefix = base.path.endsWith('/')
+      ? base.path.substring(0, base.path.length - 1)
+      : base.path;
+  return base.replace(path: '$prefix/$route', queryParameters: query);
+}
+
 class BridgeError implements Exception {
   BridgeError(this.message, {this.transport = false});
   final String message;
 
-  /// socket-level failure vs an RPC answer; only these may trigger a redial
   final bool transport;
   @override
   String toString() => message;

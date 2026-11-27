@@ -3,11 +3,15 @@ import 'package:material_ui/material_ui.dart';
 import '../bridge/bridge.dart';
 import '../theme/tokens.dart';
 import 'chat_screen.dart';
+import 'common/bridge_access.dart';
+import 'common/scaffold.dart';
+import 'common/state_message.dart';
+import 'dialogs.dart';
 import 'files_screen.dart';
 import 'git_screen.dart';
+import 'screen_loader.dart';
 import 'search_screen.dart';
 import 'terminal_screen.dart';
-import 'widgets.dart';
 
 /// tabs at the top, panes of the active tab as rows
 class WorkspaceScreen extends StatefulWidget {
@@ -19,19 +23,17 @@ class WorkspaceScreen extends StatefulWidget {
   State<WorkspaceScreen> createState() => _WorkspaceScreenState();
 }
 
-class _WorkspaceScreenState extends State<WorkspaceScreen> with BridgeAccess {
+class _WorkspaceScreenState extends State<WorkspaceScreen>
+    with BridgeAccess, ScreenLoader {
   List<TabInfo> _tabs = const [];
   List<PaneInfo> _panes = const [];
   String? _activeTab;
-  bool _loading = true;
-  String? _error;
 
   @override
   void onBridgeReady() => _load();
 
   Future<void> _load() async {
-    setState(() => _loading = true);
-    try {
+    await load(() async {
       final tabs = await bridge.tabs(widget.workspace.workspaceId);
       final panes = await bridge.panes(widget.workspace.workspaceId);
       if (!mounted) return;
@@ -50,20 +52,17 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> with BridgeAccess {
               : tabs.where((t) => t.paneCount > 0).firstOrNull?.tabId ??
                     (tabs.isEmpty ? null : tabs.first.tabId);
         }
-        _loading = false;
-        _error = null;
       });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = e.toString();
-      });
-    }
+    });
   }
 
   Future<void> _newTab() async {
-    final label = await _promptText(context, 'New tab', 'Label (optional)');
+    final label = await promptText(
+      context,
+      title: 'New tab',
+      hint: 'Label (optional)',
+      confirmLabel: 'Save',
+    );
     if (label == null) return;
     try {
       await bridge.createTab(
@@ -74,7 +73,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> with BridgeAccess {
       await _load();
     } catch (e) {
       if (!mounted) return;
-      _toast('$e');
+      showError(context, e);
     }
   }
 
@@ -111,9 +110,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> with BridgeAccess {
                   style: monoStyle(
                     context,
                     size: 12.5,
-                    color: item.$2 == 'close'
-                        ? Theme.of(context).colorScheme.error
-                        : c.ink,
+                    color: item.$2 == 'close' ? c.error : c.ink,
                   ),
                 ),
                 onTap: () => Navigator.of(sheet).pop(item.$2),
@@ -126,7 +123,12 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> with BridgeAccess {
     try {
       switch (action) {
         case 'rename':
-          final label = await _promptText(context, 'Rename pane', 'Label');
+          final label = await promptText(
+            context,
+            title: 'Rename pane',
+            hint: 'Label',
+            confirmLabel: 'Save',
+          );
           if (label == null || !mounted) return;
           await bridge.renamePane(pane.paneId, label);
         case 'focus':
@@ -142,18 +144,21 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> with BridgeAccess {
         case 'zoom':
           await bridge.zoomPane(pane.paneId);
         case 'close':
-          final ok = await _confirm(
+          final ok = await confirmDialog(
             context,
-            'Close this pane?',
-            'Running programs in it will stop.',
+            title: 'Close this pane?',
+            body: 'Running programs in it will stop.',
+            cancelLabel: 'Keep',
+            confirmLabel: 'Close',
+            destructive: true,
           );
-          if (ok != true || !mounted) return;
+          if (!ok || !mounted) return;
           await bridge.closePane(pane.paneId);
       }
       await _load();
     } catch (e) {
       if (!mounted) return;
-      _toast('$e');
+      showError(context, e);
     }
   }
 
@@ -190,9 +195,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> with BridgeAccess {
                   style: monoStyle(
                     context,
                     size: 12.5,
-                    color: item.$2 == 'close'
-                        ? Theme.of(context).colorScheme.error
-                        : c.ink,
+                    color: item.$2 == 'close' ? c.error : c.ink,
                   ),
                 ),
                 onTap: () => Navigator.of(sheet).pop(item.$2),
@@ -208,29 +211,31 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> with BridgeAccess {
           setState(() => _activeTab = tab.tabId);
           await bridge.call('tab.focus', {'tab_id': tab.tabId});
         case 'rename':
-          final label = await _promptText(context, 'Rename tab', 'Label');
+          final label = await promptText(
+            context,
+            title: 'Rename tab',
+            hint: 'Label',
+            confirmLabel: 'Save',
+          );
           if (label == null || !mounted) return;
           await bridge.renameTab(tab.tabId, label);
         case 'close':
-          final ok = await _confirm(
+          final ok = await confirmDialog(
             context,
-            'Close this tab?',
-            'All panes in it will stop.',
+            title: 'Close this tab?',
+            body: 'All panes in it will stop.',
+            cancelLabel: 'Keep',
+            confirmLabel: 'Close',
+            destructive: true,
           );
-          if (ok != true || !mounted) return;
+          if (!ok || !mounted) return;
           await bridge.closeTab(tab.tabId);
       }
       await _load();
     } catch (e) {
       if (!mounted) return;
-      _toast('$e');
+      showError(context, e);
     }
-  }
-
-  void _toast(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message, style: monoStyle(context, size: 12))),
-    );
   }
 
   String _paneCount() {
@@ -254,7 +259,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> with BridgeAccess {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    final status = connectionSubtitle(context, _error);
+    final connected = app.connected;
+    final status = connectionSubtitle(context, error);
     return DrovesScaffold(
       title: widget.workspace.label.isEmpty
           ? widget.workspace.workspaceId
@@ -269,31 +275,28 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> with BridgeAccess {
         onPressed: () => Navigator.of(context).maybePop(),
       ),
       actions: [
-        IconButton(
-          icon: const Icon(Icons.add, size: 20),
-          color: c.ink,
-          tooltip: 'New tab',
-          onPressed: _newTab,
-        ),
-        IconButton(
-          icon: const Icon(Icons.search, size: 20),
-          color: c.ink,
-          tooltip: 'Search this workspace',
-          onPressed: () => Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) => SearchScreen(
-                workspace: widget.workspace.workspaceId,
-                label: widget.workspace.label,
+        if (connected) ...[
+          RefreshButton(busy: loading, onPressed: _load),
+          IconButton(
+            icon: const Icon(Icons.add, size: 20),
+            color: c.ink,
+            tooltip: 'New tab',
+            onPressed: _newTab,
+          ),
+          IconButton(
+            icon: const Icon(Icons.search, size: 20),
+            color: c.ink,
+            tooltip: 'Search this workspace',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => SearchScreen(
+                  workspace: widget.workspace.workspaceId,
+                  label: widget.workspace.label,
+                ),
               ),
             ),
           ),
-        ),
-        IconButton(
-          icon: const Icon(Icons.refresh, size: 20),
-          color: c.ink,
-          tooltip: 'Refresh panes',
-          onPressed: _load,
-        ),
+        ],
       ],
       child: _buildBody(context),
     );
@@ -301,11 +304,10 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> with BridgeAccess {
 
   Widget _buildBody(BuildContext context) {
     final c = context.colors;
-    final live = app.bridge;
-    final connected = live != null && live.state == BridgeState.ready;
+    final connected = app.connected;
     final state = ScreenState(
-      loading: _loading,
-      error: _error,
+      loading: loading && _panes.isEmpty,
+      error: error,
       connected: connected,
       empty: _panes.isEmpty,
       subject: 'workspace',
@@ -316,7 +318,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> with BridgeAccess {
       rowHeight: 120,
       emptyIcon: Icons.terminal,
     );
-    if (_loading || !connected || _error != null || _panes.isEmpty) {
+    if (loading || !connected || error != null || _panes.isEmpty) {
       return state;
     }
     return Column(
@@ -463,9 +465,6 @@ class _PaneRow extends StatelessWidget {
                     style: OutlinedButton.styleFrom(
                       visualDensity: VisualDensity.compact,
                       side: BorderSide(color: c.rule),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(Radii.row),
-                      ),
                     ),
                     child: Text('Chat', style: monoStyle(context, size: 11)),
                   ),
@@ -544,66 +543,4 @@ class _InspectorBar extends StatelessWidget {
       ),
     );
   }
-}
-
-Future<String?> _promptText(BuildContext context, String title, String hint) {
-  final controller = TextEditingController();
-  final c = context.colors;
-  return showDialog<String>(
-    context: context,
-    builder: (dialog) => AlertDialog(
-      title: Text(title, style: nameStyle(context, size: 17)),
-      content: TextField(
-        controller: controller,
-        autofocus: true,
-        style: monoStyle(context, size: 13),
-        decoration: InputDecoration(
-          hintText: hint,
-          hintStyle: monoStyle(context, size: 12, color: c.muted),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(Radii.row),
-            borderSide: BorderSide(color: c.rule),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(Radii.row),
-            borderSide: BorderSide(color: c.ink),
-          ),
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(dialog).pop(null),
-          child: const Text('Cancel'),
-        ),
-        TextButton(
-          onPressed: () => Navigator.of(dialog).pop(controller.text.trim()),
-          child: const Text('Save'),
-        ),
-      ],
-    ),
-  );
-}
-
-Future<bool?> _confirm(BuildContext context, String title, String body) {
-  final c = context.colors;
-  return showDialog<bool>(
-    context: context,
-    builder: (dialog) => AlertDialog(
-      title: Text(title, style: nameStyle(context, size: 17)),
-      content: Text(body, style: monoStyle(context, size: 12, color: c.muted)),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(dialog).pop(false),
-          child: const Text('Keep'),
-        ),
-        TextButton(
-          onPressed: () => Navigator.of(dialog).pop(true),
-          child: Text(
-            'Close',
-            style: TextStyle(color: Theme.of(context).colorScheme.error),
-          ),
-        ),
-      ],
-    ),
-  );
 }

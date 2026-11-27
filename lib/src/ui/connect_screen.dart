@@ -1,9 +1,10 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:material_ui/material_ui.dart';
 
+import '../bridge/failure.dart';
 import '../model/app_state.dart';
 import '../theme/tokens.dart';
-import 'widgets.dart';
+import 'common/scaffold.dart';
 
 /// first-run setup: a reachable bridge URL plus its access token. The provider
 /// decides the address and whether a third party carries the traffic.
@@ -114,8 +115,8 @@ class _ConnectScreenState extends State<ConnectScreen> {
           ),
           const SizedBox(height: Space.sm),
           Text(
-            'Droves reads your agents through a small bridge on the machine '
-            'where they run. You choose how that bridge is reached.',
+            'Droves reads the panes on a machine you own. Add that machine '
+            'below.',
             style: monoStyle(context, size: 12, color: c.muted),
           ),
           if (!kIsWeb && AppScope.of(context).endpoints.isNotEmpty) ...[
@@ -176,6 +177,13 @@ class _ConnectScreenState extends State<ConnectScreen> {
             keyboard: kIsWeb ? null : TextInputType.url,
             readOnly: kIsWeb,
           ),
+          if (kIsWeb) ...[
+            const SizedBox(height: Space.xs),
+            Text(
+              'Set by the bridge serving this page.',
+              style: monoStyle(context, size: 11, color: c.muted),
+            ),
+          ],
           const SizedBox(height: Space.md),
           _Field(
             label: 'Access token',
@@ -200,10 +208,10 @@ class _ConnectScreenState extends State<ConnectScreen> {
               padding: const EdgeInsets.all(Space.sm),
               decoration: BoxDecoration(
                 border: Border.all(color: c.accent),
-                borderRadius: BorderRadius.circular(Radii.row),
+                borderRadius: BorderRadius.circular(Radii.md),
               ),
               child: Text(
-                _error!,
+                friendlyErrorText(_error, base: Uri.tryParse(_url.text)),
                 style: monoStyle(context, size: 11, color: c.accent),
               ),
             ),
@@ -217,9 +225,6 @@ class _ConnectScreenState extends State<ConnectScreen> {
                 backgroundColor: c.ink,
                 foregroundColor: c.paper,
                 disabledBackgroundColor: c.muted,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(Radii.row),
-                ),
               ),
               child: _busy
                   ? Row(

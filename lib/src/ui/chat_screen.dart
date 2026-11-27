@@ -14,40 +14,15 @@ import '../platform_web_stub.dart'
     if (dart.library.js_interop) '../platform_web.dart'
     as platform;
 import '../bridge/bridge.dart';
+import '../bridge/decode.dart';
+import '../model/agent_message.dart';
 import '../model/app_state.dart';
 import '../theme/tokens.dart';
+import 'common/bridge_access.dart';
+import 'common/scaffold.dart';
+import 'common/state_message.dart';
 import 'mermaid_block.dart';
 import 'terminal_screen.dart';
-import 'widgets.dart';
-
-class AgentMessage {
-  AgentMessage({
-    required this.id,
-    required this.role,
-    required this.text,
-    this.kind = 'message',
-    this.toolName,
-    this.isError = false,
-    this.textBytes,
-    this.sentAt,
-  });
-
-  final String id;
-  final String role;
-
-  /// `message`, `tool_call`, `tool_result` or `error`.
-  final String kind;
-  final String text;
-  final String? toolName;
-  final bool isError;
-
-  /// bridge withheld the payload; [bridge.historyEntry] loads it on demand
-  final int? textBytes;
-  final String? sentAt;
-
-  bool get isUser => role == 'user';
-  bool get isTool => kind == 'tool_call' || kind == 'tool_result';
-}
 
 /// bridge projects each CLI transcript into a uniform `messages` array;
 /// replies type into the pane via `pane.send_text`
@@ -207,18 +182,16 @@ class _ChatScreenState extends State<ChatScreen> with BridgeAccess {
         'terminal_id': widget.pane.terminalId,
         'history_version': 2,
       });
-      final raw = (r['entries'] as List?) ?? const [];
-      final next = raw
-          .cast<Map<String, dynamic>>()
+      final next = maps(r['entries'])
           .map((m) {
             return AgentMessage(
-              id: (m['id'] as String?) ?? '',
+              id: str(m['id']),
               role: (m['role'] as String?) ?? 'assistant',
               kind: (m['kind'] as String?) ?? 'message',
-              text: (m['text'] as String?) ?? '',
+              text: str(m['text']),
               toolName: m['tool_name'] as String?,
               isError: m['is_error'] == true,
-              textBytes: (m['text_bytes'] as num?)?.toInt(),
+              textBytes: integer(m['text_bytes']),
               sentAt: m['sent_at'] as String?,
             );
           })
@@ -318,7 +291,7 @@ class _ChatScreenState extends State<ChatScreen> with BridgeAccess {
       setState(() => _staged.add(staged));
       _persistDraft();
     } catch (e) {
-      if (mounted) _toast('Could not attach: $e');
+      if (mounted) showError(context, e);
     } finally {
       if (mounted) setState(() => _uploading = false);
     }
@@ -334,18 +307,12 @@ class _ChatScreenState extends State<ChatScreen> with BridgeAccess {
     unawaited(_DraftStore.save(_draftKey, _input.text, _staged));
   }
 
-  void _toast(String message) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message, style: monoStyle(context, size: 12))),
-    );
-  }
-
   Future<void> _interrupt() async {
     try {
       await bridge.sendText(widget.pane.paneId, '\x1b');
     } catch (e) {
-      _toast('Could not interrupt: $e');
+      if (!mounted) return;
+      showError(context, e);
     }
   }
 
@@ -365,13 +332,7 @@ class _ChatScreenState extends State<ChatScreen> with BridgeAccess {
       unawaited(_refreshAgentStatus());
       await _load(silent: true);
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(e.toString(), style: monoStyle(context, size: 12)),
-          ),
-        );
-      }
+      if (mounted) showError(context, e);
     } finally {
       if (mounted) setState(() => _sending = false);
     }
@@ -380,16 +341,22 @@ class _ChatScreenState extends State<ChatScreen> with BridgeAccess {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
+    final connected = app.connected;
+    final status = connectionSubtitle(context, null);
     return DrovesScaffold(
       title: widget.label,
       subtitle: Row(
         children: [
-          StatusWord(_agentStatus),
-          const SizedBox(width: Space.sm),
-          Text(
-            widget.pane.agent ?? 'agent',
-            style: monoStyle(context, size: 10, color: c.muted),
-          ),
+          if (status.isNotEmpty)
+            Flexible(child: LedgerLabel(status))
+          else ...[
+            StatusWord(_agentStatus),
+            const SizedBox(width: Space.sm),
+            Text(
+              widget.pane.agent ?? 'agent',
+              style: monoStyle(context, size: 10, color: c.muted),
+            ),
+          ],
         ],
       ),
       leading: IconButton(
@@ -399,66 +366,63 @@ class _ChatScreenState extends State<ChatScreen> with BridgeAccess {
         onPressed: () => Navigator.of(context).maybePop(),
       ),
       actions: [
-        IconButton(
-          icon: const Icon(Icons.terminal, size: 20),
-          color: c.ink,
-          tooltip: 'Terminal',
-          // replace the route so Back stays pointed at the workspace
-          onPressed: () => Navigator.of(context).pushReplacement(
-            MaterialPageRoute(
-              builder: (_) => TerminalScreen(
-                pane: widget.pane,
-                workspaceLabel: widget.label,
+        if (connected) ...[
+          IconButton(
+            icon: const Icon(Icons.terminal, size: 20),
+            color: c.ink,
+            tooltip: 'Terminal',
+            // replace the route so Back stays pointed at the workspace
+            onPressed: () => Navigator.of(context).pushReplacement(
+              MaterialPageRoute(
+                builder: (_) => TerminalScreen(
+                  pane: widget.pane,
+                  workspaceLabel: widget.label,
+                ),
               ),
             ),
           ),
-        ),
-        if (widget.pane.agent != null && widget.pane.agent!.isNotEmpty)
+          if (widget.pane.agent != null && widget.pane.agent!.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.psychology_outlined, size: 20),
+              color: _reasoningOpen ? c.accent : c.ink,
+              tooltip: _reasoningOpen ? 'Hide reasoning' : 'Show reasoning',
+              onPressed: _toggleReasoning,
+            ),
           IconButton(
-            icon: const Icon(Icons.psychology_outlined, size: 20),
-            color: _reasoningOpen ? c.accent : c.ink,
-            tooltip: _reasoningOpen ? 'Hide reasoning' : 'Show reasoning',
-            onPressed: _toggleReasoning,
+            icon: const Icon(Icons.search, size: 20),
+            color: _searching ? c.accent : c.ink,
+            tooltip: _searching ? 'Close search' : 'Search transcript',
+            onPressed: _toggleSearch,
           ),
-        IconButton(
-          icon: const Icon(Icons.search, size: 20),
-          color: _searching ? c.accent : c.ink,
-          tooltip: _searching ? 'Close search' : 'Search transcript',
-          onPressed: _toggleSearch,
-        ),
-        IconButton(
-          icon: const Icon(Icons.refresh, size: 20),
-          color: c.ink,
-          tooltip: 'Reload transcript',
-          onPressed: () => _load(),
-        ),
+          RefreshButton(busy: _loading, onPressed: _load),
+        ],
       ],
       child: Column(
         children: [
-          if (_searching) _searchBar(context),
+          if (connected && _searching) _searchBar(context),
           Expanded(child: _buildBody(context)),
-          _Composer(
-            controller: _input,
-            focusNode: _inputFocus,
-            sending: _sending,
-            active: _agentActive,
-            onSend: _send,
-            onInterrupt: _interrupt,
-            onAttach: _attach,
-            attaching: _uploading,
-            staged: _staged,
-            onRemove: _removeStaged,
-          ),
+          if (connected)
+            _Composer(
+              controller: _input,
+              focusNode: _inputFocus,
+              sending: _sending,
+              active: _agentActive,
+              onSend: _send,
+              onInterrupt: _interrupt,
+              onAttach: _attach,
+              attaching: _uploading,
+              staged: _staged,
+              onRemove: _removeStaged,
+            ),
         ],
       ),
     );
   }
 
   Widget _buildBody(BuildContext context) {
-    final live = app.bridge;
-    final connected = live != null && live.state == BridgeState.ready;
+    final connected = app.connected;
     final state = ScreenState(
-      loading: _loading,
+      loading: _loading && _messages.isEmpty,
       error: _error,
       connected: connected,
       empty: _messages.isEmpty,
@@ -1350,7 +1314,7 @@ class _ToolCardState extends State<_ToolCard> {
       );
       if (!mounted) return;
       setState(() {
-        _payload = (r['text'] as String?) ?? '';
+        _payload = str(r['text']);
         _loading = false;
       });
     } catch (e) {
@@ -1485,7 +1449,7 @@ class _ToolCardState extends State<_ToolCard> {
             ),
             child: _loading
                 ? Text(
-                    'Loading payload',
+                    'Opening chat',
                     style: monoStyle(context, size: 11, color: c.muted),
                   )
                 : _error != null
@@ -1624,7 +1588,7 @@ class _Composer extends StatelessWidget {
               children: [
                 IconButton(
                   onPressed: attaching ? null : onAttach,
-                  color: c.ink,
+                  color: c.muted,
                   tooltip: 'Attach a file',
                   icon: attaching
                       ? SizedBox(
@@ -1632,7 +1596,7 @@ class _Composer extends StatelessWidget {
                           height: 14,
                           child: CircularProgressIndicator(
                             strokeWidth: 1.6,
-                            color: c.ink,
+                            color: c.muted,
                           ),
                         )
                       : const Icon(Icons.attach_file, size: 20),
@@ -1716,11 +1680,11 @@ class _DraftStore {
           StagedFile(
             path: path,
             name: (f['name'] as String?) ?? path.split('/').last,
-            size: (f['size'] as num?)?.toInt() ?? 0,
+            size: integer(f['size']) ?? 0,
           ),
         );
       }
-      final draft = _Draft((j['text'] as String?) ?? '', staged);
+      final draft = _Draft(str(j['text']), staged);
       _memory[key] = draft;
       return draft;
     } catch (_) {
@@ -1776,13 +1740,13 @@ class _TranscriptCache {
           .cast<Map<String, dynamic>>()
           .map(
             (m) => AgentMessage(
-              id: (m['id'] as String?) ?? '',
+              id: str(m['id']),
               role: (m['role'] as String?) ?? 'assistant',
               kind: (m['kind'] as String?) ?? 'message',
-              text: (m['text'] as String?) ?? '',
+              text: str(m['text']),
               toolName: m['tool_name'] as String?,
               isError: m['is_error'] == true,
-              textBytes: (m['text_bytes'] as num?)?.toInt(),
+              textBytes: integer(m['text_bytes']),
               sentAt: m['sent_at'] as String?,
             ),
           )

@@ -12,7 +12,8 @@ import 'package:droves/src/theme/tokens.dart';
 import 'package:droves/src/ui/agents_screen.dart';
 import 'package:droves/src/ui/connect_screen.dart';
 import 'package:droves/src/ui/inbox_screen.dart';
-import 'package:droves/src/ui/widgets.dart';
+
+import 'package:droves/src/ui/common/scaffold.dart';
 
 Future<void> _loadFonts() async {
   for (final entry in {

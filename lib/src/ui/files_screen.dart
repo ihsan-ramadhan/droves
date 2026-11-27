@@ -1,30 +1,13 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../bridge/bridge.dart';
+import '../bridge/decode.dart';
+import '../model/file_entry.dart';
 import '../theme/tokens.dart';
-import 'widgets.dart';
-
-class FileEntry {
-  FileEntry({
-    required this.name,
-    required this.path,
-    required this.isDir,
-    required this.size,
-  });
-
-  final String name;
-  final String path;
-  final bool isDir;
-  final int size;
-
-  factory FileEntry.fromJson(Map<String, dynamic> j) => FileEntry(
-    name: (j['name'] as String?) ?? '',
-    path: (j['path'] as String?) ?? '',
-    isDir: j['type'] == 'directory',
-    size: (j['size'] as num?)?.toInt() ?? 0,
-  );
-}
+import 'common/bridge_access.dart';
+import 'common/scaffold.dart';
+import 'common/state_message.dart';
+import 'dialogs.dart';
 
 /// writes go through the bridge's upload path so permissions and paths stay on the owning machine
 class FilesScreen extends StatefulWidget {
@@ -79,8 +62,7 @@ class _FilesScreenState extends State<FilesScreen> with BridgeAccess {
         showHidden: _showHidden,
       );
       final entries =
-          ((r['entries'] as List?) ?? const [])
-              .cast<Map<String, dynamic>>()
+          maps(r['entries'])
               .map(FileEntry.fromJson)
               .where((e) => _showHidden || !e.name.startsWith('.'))
               .toList()
@@ -143,29 +125,11 @@ class _FilesScreenState extends State<FilesScreen> with BridgeAccess {
   }
 
   Future<String?> _askName(String title, String hint) async {
-    final controller = TextEditingController();
-    final name = await showDialog<String>(
-      context: context,
-      builder: (dialog) => AlertDialog(
-        title: Text(title, style: nameStyle(context, size: 17)),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          style: monoStyle(context, size: 13),
-          decoration: InputDecoration(hintText: hint, isDense: true),
-          onSubmitted: (v) => Navigator.of(dialog).pop(v.trim()),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialog).pop(),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(dialog).pop(controller.text.trim()),
-            child: const Text('Create'),
-          ),
-        ],
-      ),
+    final name = await promptText(
+      context,
+      title: title,
+      hint: hint,
+      confirmLabel: 'Create',
     );
     return (name == null || name.isEmpty || name.contains('/')) ? null : name;
   }
@@ -187,7 +151,7 @@ class _FilesScreenState extends State<FilesScreen> with BridgeAccess {
       );
       if (mounted) await _load(_currentPath);
     } catch (e) {
-      if (mounted) _toast('$e');
+      if (mounted) showError(context, e);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -201,7 +165,7 @@ class _FilesScreenState extends State<FilesScreen> with BridgeAccess {
       await bridge.createDirectory(widget.workspace, _currentPath, name);
       await _load(_currentPath);
     } catch (e) {
-      if (mounted) _toast('$e');
+      if (mounted) showError(context, e);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -211,9 +175,6 @@ class _FilesScreenState extends State<FilesScreen> with BridgeAccess {
     final c = context.colors;
     final action = await showModalBottomSheet<String>(
       context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(Radii.card)),
-      ),
       builder: (sheet) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -241,10 +202,10 @@ class _FilesScreenState extends State<FilesScreen> with BridgeAccess {
               onTap: () => Navigator.of(sheet).pop('open'),
             ),
             ListTile(
-              leading: Icon(Icons.delete_outline, size: 18, color: c.accent),
+              leading: Icon(Icons.delete_outline, size: 18, color: c.error),
               title: Text(
                 'Delete',
-                style: monoStyle(context, size: 12.5, color: c.accent),
+                style: monoStyle(context, size: 12.5, color: c.error),
               ),
               onTap: () => Navigator.of(sheet).pop('delete'),
             ),
@@ -257,49 +218,32 @@ class _FilesScreenState extends State<FilesScreen> with BridgeAccess {
       await _open(e);
       return;
     }
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (dialog) => AlertDialog(
-        title: Text('Delete ${e.name}?', style: nameStyle(context, size: 17)),
-        content: Text(
-          e.isDir
-              ? 'Deletes the folder and everything inside it.'
-              : 'Deletes the file.',
-          style: monoStyle(context, size: 12, color: c.muted),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialog).pop(false),
-            child: const Text('Keep'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(dialog).pop(true),
-            child: Text('Delete', style: TextStyle(color: c.accent)),
-          ),
-        ],
-      ),
+    final ok = await confirmDialog(
+      context,
+      title: 'Delete ${e.name}?',
+      body: e.isDir
+          ? 'Deletes the folder and everything inside it.'
+          : 'Deletes the file.',
+      cancelLabel: 'Keep',
+      confirmLabel: 'Delete',
+      destructive: true,
     );
-    if (ok != true) return;
+    if (!ok) return;
     setState(() => _busy = true);
     try {
       await bridge.deleteFile(widget.workspace, e.path);
       await _load(_currentPath);
     } catch (err) {
-      if (mounted) _toast('$err');
+      if (mounted) showError(context, err);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
-  void _toast(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message, style: monoStyle(context, size: 12))),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
+    final connected = app.connected;
     final title = _stackDirs.isEmpty ? widget.label : _stackDirs.last.name;
     final status = connectionSubtitle(context, _error);
     return DrovesScaffold(
@@ -322,46 +266,37 @@ class _FilesScreenState extends State<FilesScreen> with BridgeAccess {
             _stackDirs.isEmpty ? Navigator.of(context).maybePop() : _up(),
       ),
       actions: [
-        PopupMenuButton<String>(
-          icon: const Icon(Icons.add, size: 20),
-          color: c.paper,
-          tooltip: 'New',
-          enabled: !_busy,
-          onSelected: (v) => v == 'file' ? _createFile() : _createFolder(),
-          itemBuilder: (_) => [
-            PopupMenuItem(
-              value: 'file',
-              child: Text('New file', style: monoStyle(context, size: 12)),
-            ),
-            PopupMenuItem(
-              value: 'folder',
-              child: Text('New folder', style: monoStyle(context, size: 12)),
-            ),
-          ],
-        ),
-        IconButton(
-          icon: Icon(
-            _showHidden
-                ? Icons.visibility_outlined
-                : Icons.visibility_off_outlined,
-            size: 20,
+        if (connected) ...[
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.add, size: 20),
+            color: c.paper,
+            tooltip: 'New',
+            enabled: !_busy,
+            onSelected: (v) => v == 'file' ? _createFile() : _createFolder(),
+            itemBuilder: (_) => [
+              PopupMenuItem(
+                value: 'file',
+                child: Text('New file', style: monoStyle(context, size: 12)),
+              ),
+              PopupMenuItem(
+                value: 'folder',
+                child: Text('New folder', style: monoStyle(context, size: 12)),
+              ),
+            ],
           ),
-          color: c.ink,
-          tooltip: _showHidden ? 'Hide hidden files' : 'Show hidden files',
-          onPressed: _toggleHidden,
-        ),
-        IconButton(
-          icon: _busy
-              ? const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 1.6),
-                )
-              : const Icon(Icons.refresh, size: 20),
-          color: c.ink,
-          tooltip: 'Refresh',
-          onPressed: _busy ? null : () => _load(_currentPath),
-        ),
+          IconButton(
+            icon: Icon(
+              _showHidden
+                  ? Icons.visibility_outlined
+                  : Icons.visibility_off_outlined,
+              size: 20,
+            ),
+            color: c.ink,
+            tooltip: _showHidden ? 'Hide hidden files' : 'Show hidden files',
+            onPressed: _toggleHidden,
+          ),
+          RefreshButton(busy: _busy, onPressed: () => _load(_currentPath)),
+        ],
       ],
       child: _buildBody(context, title),
     );
@@ -369,10 +304,9 @@ class _FilesScreenState extends State<FilesScreen> with BridgeAccess {
 
   Widget _buildBody(BuildContext context, String title) {
     final c = context.colors;
-    final live = app.bridge;
-    final connected = live != null && live.state == BridgeState.ready;
+    final connected = app.connected;
     final state = ScreenState(
-      loading: _loading,
+      loading: _loading && _entries.isEmpty,
       error: _error,
       connected: connected,
       empty: _entries.isEmpty,
@@ -493,7 +427,7 @@ class _FileScreenState extends State<FileScreen> with BridgeAccess {
       final r = await bridge.readFile(widget.workspace, widget.path);
       if (!mounted) return;
       setState(() {
-        _text = (r['text'] as String?) ?? '';
+        _text = str(r['text']);
         _truncated = r['truncated'] == true;
         _binary = r['binary'] == true;
         _editor.text = _text;
@@ -530,9 +464,7 @@ class _FileScreenState extends State<FileScreen> with BridgeAccess {
     } catch (e) {
       if (!mounted) return;
       setState(() => _saving = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$e', style: monoStyle(context, size: 12))),
-      );
+      showError(context, e);
     }
   }
 
@@ -541,35 +473,22 @@ class _FileScreenState extends State<FileScreen> with BridgeAccess {
       Navigator.of(context).maybePop();
       return;
     }
-    final c = context.colors;
-    final discard = await showDialog<bool>(
-      context: context,
-      builder: (dialog) => AlertDialog(
-        title: Text('Discard changes?', style: nameStyle(context, size: 17)),
-        content: Text(
-          '${widget.name} has unsaved edits.',
-          style: monoStyle(context, size: 12, color: c.muted),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialog).pop(false),
-            child: const Text('Keep editing'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(dialog).pop(true),
-            child: Text('Discard', style: TextStyle(color: c.accent)),
-          ),
-        ],
-      ),
+    final discard = await confirmDialog(
+      context,
+      title: 'Discard changes?',
+      body: '${widget.name} has unsaved edits.',
+      cancelLabel: 'Keep editing',
+      confirmLabel: 'Discard',
+      destructive: true,
     );
-    if (discard == true && mounted) Navigator.of(context).maybePop();
+    if (discard && mounted) Navigator.of(context).maybePop();
   }
 
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    final live = app.bridge;
-    final connected = live != null && live.state == BridgeState.ready;
+    final connected = app.connected;
+    final status = connectionSubtitle(context, _error);
     return PopScope(
       canPop: !_editing || _editor.text == _text,
       onPopInvokedWithResult: (didPop, _) {
@@ -578,10 +497,12 @@ class _FileScreenState extends State<FileScreen> with BridgeAccess {
       child: DrovesScaffold(
         title: widget.name,
         subtitle: LedgerLabel(
-          _binary
-              ? 'binary · read only'
+          status.isNotEmpty
+              ? status
+              : _binary
+              ? 'binary · read-only'
               : _truncated
-              ? 'preview truncated · read only'
+              ? 'preview truncated · read-only'
               : widget.path,
         ),
         leading: IconButton(
@@ -591,7 +512,7 @@ class _FileScreenState extends State<FileScreen> with BridgeAccess {
           onPressed: _leave,
         ),
         actions: [
-          if (_editable)
+          if (connected && _editable)
             _editing
                 ? IconButton(
                     icon: _saving
@@ -614,7 +535,7 @@ class _FileScreenState extends State<FileScreen> with BridgeAccess {
         ],
         child: _loading || !connected || _error != null || _binary
             ? ScreenState(
-                loading: _loading,
+                loading: _loading && _text.isEmpty,
                 error: _error,
                 connected: connected,
                 empty: _binary,

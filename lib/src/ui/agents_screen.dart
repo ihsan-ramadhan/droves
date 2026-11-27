@@ -6,19 +6,26 @@ import 'package:material_ui/material_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../bridge/bridge.dart';
+import '../bridge/failure.dart';
 import '../model/app_state.dart';
 import '../model/keybar.dart';
 import '../notifications.dart';
 import '../platform_web_stub.dart'
     if (dart.library.js_interop) '../platform_web.dart'
     as platform;
+import '../bridge/decode.dart';
 import '../theme/tokens.dart';
 import '../updates.dart';
 import 'chat_screen.dart';
-import 'connections_screen.dart';
+import 'common/bridge_access.dart';
+import 'common/scaffold.dart';
+import 'common/state_message.dart';
+import 'common/status_group.dart';
 import 'connect_screen.dart';
+import 'connections_screen.dart';
+import 'dialogs.dart';
 import 'key_bar.dart';
-import 'widgets.dart';
+import 'screen_loader.dart';
 
 /// all agent-attached panes across workspaces
 class AgentsScreen extends StatefulWidget {
@@ -28,27 +35,20 @@ class AgentsScreen extends StatefulWidget {
   State<AgentsScreen> createState() => _AgentsScreenState();
 }
 
-class _AgentsScreenState extends State<AgentsScreen> with BridgeAccess {
+class _AgentsScreenState extends State<AgentsScreen>
+    with BridgeAccess, ScreenLoader {
   List<PaneInfo> _agents = const [];
   Map<String, String> _workspaceLabels = const {};
-  bool _loading = false;
-  String? _error;
 
   @override
   void onBridgeReady() => _load();
 
   Future<void> _load() async {
     final live = app.bridge;
-    if (live == null) {
-      // no bridge yet: keep the empty state, not a skeleton that never resolves
-      if (mounted) setState(() => _loading = false);
-      return;
-    }
-    setState(() => _loading = true);
-    try {
+    if (live == null) return idle();
+    await load(() async {
       final r = await live.call('agent.list');
-      final raw = ((r['agents'] as List?) ?? const [])
-          .cast<Map<String, dynamic>>();
+      final raw = maps(r['agents']);
       final workspaces = await live.workspaces();
       if (!mounted) return;
       setState(() {
@@ -57,43 +57,35 @@ class _AgentsScreenState extends State<AgentsScreen> with BridgeAccess {
           for (final w in workspaces)
             w.workspaceId: w.label.isEmpty ? w.workspaceId : w.label,
         };
-        _loading = false;
-        _error = null;
       });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = e.toString();
-      });
-    }
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final waiting = _agents.where((a) => a.agentStatus == 'blocked').length;
-    final status = connectionSubtitle(context, _error);
+    final connected = app.connected;
+    final status = connectionSubtitle(context, error);
     final connectionLabel = status.isEmpty ? null : status;
     return DrovesScaffold(
       title: 'Agents',
       subtitle: LedgerLabel(
         connectionLabel ??
-            (_loading
+            (loading
                 ? 'reading agents'
                 : '${_agents.length} running · $waiting waiting'),
       ),
-      actions: [RefreshButton(busy: _loading, onPressed: _load)],
+      actions: [if (connected) RefreshButton(busy: loading, onPressed: _load)],
       child: _buildBody(context),
     );
   }
 
   Widget _buildBody(BuildContext context) {
     final c = context.colors;
-    final live = app.bridge;
-    final connected = live != null && live.state == BridgeState.ready;
+    final connected = app.connected;
     final state = ScreenState(
-      loading: _loading && _agents.isEmpty,
-      error: _error,
+      loading: loading && _agents.isEmpty,
+      error: error,
       connected: connected,
       empty: _agents.isEmpty,
       subject: 'agents',
@@ -104,100 +96,95 @@ class _AgentsScreenState extends State<AgentsScreen> with BridgeAccess {
       rowHeight: 60,
       emptyIcon: Icons.smart_toy_outlined,
     );
-    if (_loading && _agents.isEmpty ||
+    if (loading && _agents.isEmpty ||
         !connected ||
-        _error != null ||
+        error != null ||
         _agents.isEmpty) {
       return state;
     }
-    final sorted = [..._agents]
-      ..sort((a, b) {
-        int rank(String s) => switch (s) {
-          'blocked' => 0,
-          'working' => 1,
-          'done' => 2,
-          _ => 3,
-        };
-        return rank(a.agentStatus).compareTo(rank(b.agentStatus));
-      });
+    final sections = statusSections(_agents, (a) => a.agentStatus);
     return RefreshIndicator(
       color: c.ink,
       onRefresh: _load,
-      child: ListView.separated(
+      child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
-        itemCount: sorted.length,
-        separatorBuilder: (_, _) => Divider(color: c.rule, height: 1),
-        itemBuilder: (_, i) {
-          final a = sorted[i];
-          final label = _workspaceLabels[a.workspaceId] ?? a.workspaceId;
-          return InkWell(
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => ChatScreen(pane: a, label: label),
-              ),
+        children: [
+          for (final section in sections) ...[
+            StatusSectionHeader(
+              group: section.group,
+              count: section.items.length,
             ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: Space.md,
-                vertical: 13,
-              ),
-              child: Row(
+            for (var i = 0; i < section.items.length; i++) ...[
+              if (i > 0) Divider(color: c.rule, height: 1),
+              _agentRow(context, section.items[i]),
+            ],
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _agentRow(BuildContext context, PaneInfo a) {
+    final c = context.colors;
+    final label = _workspaceLabels[a.workspaceId] ?? a.workspaceId;
+    return InkWell(
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ChatScreen(pane: a, label: label),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: Space.md, vertical: 13),
+        child: Row(
+          children: [
+            TallyRail(
+              workspaces: [
+                WorkspaceInfo(
+                  workspaceId: a.workspaceId,
+                  label: label,
+                  number: 0,
+                  paneCount: 1,
+                  tabCount: 1,
+                  agentStatus: a.agentStatus,
+                ),
+              ],
+            ),
+            const SizedBox(width: Space.sm),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  TallyRail(
-                    workspaces: [
-                      WorkspaceInfo(
-                        workspaceId: a.workspaceId,
-                        label: label,
-                        number: 0,
-                        paneCount: 1,
-                        tabCount: 1,
-                        agentStatus: a.agentStatus,
+                  Row(
+                    children: [
+                      Text(
+                        a.agent ?? 'agent',
+                        style: nameStyle(
+                          context,
+                          size: 15,
+                          weight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(width: Space.sm),
+                      Text(
+                        label,
+                        style: monoStyle(context, size: 10.5, color: c.muted),
                       ),
                     ],
                   ),
-                  const SizedBox(width: Space.sm),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Text(
-                              a.agent ?? 'agent',
-                              style: nameStyle(
-                                context,
-                                size: 15,
-                                weight: FontWeight.w600,
-                              ),
-                            ),
-                            const SizedBox(width: Space.sm),
-                            Text(
-                              label,
-                              style: monoStyle(
-                                context,
-                                size: 10.5,
-                                color: c.muted,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          a.titleOrCwd,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: monoStyle(context, size: 10.5, color: c.muted),
-                        ),
-                      ],
-                    ),
+                  const SizedBox(height: 2),
+                  Text(
+                    a.titleOrCwd,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: monoStyle(context, size: 10.5, color: c.muted),
                   ),
-                  const SizedBox(width: Space.sm),
-                  StatusWord(a.agentStatus),
                 ],
               ),
             ),
-          );
-        },
+            const SizedBox(width: Space.sm),
+            StatusWord(a.agentStatus),
+          ],
+        ),
       ),
     );
   }
@@ -234,11 +221,43 @@ class _ExposureTileState extends State<_ExposureTile> with BridgeAccess {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
+    if (_info == null) {
+      final text = _error != null
+          ? friendlyErrorText(
+              _error,
+              base: Uri.tryParse(AppScope.of(context).baseUrl),
+            )
+          : app.connected
+          ? 'Reading from the bridge'
+          : 'not connected';
+      return ListTile(
+        title: Text(
+          'How this bridge is reached',
+          style: monoStyle(context, size: 12),
+        ),
+        subtitle: Text(
+          text,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: monoStyle(context, size: 10.5, color: c.muted),
+        ),
+        onTap: _error == null ? null : _load,
+        trailing: _error == null
+            ? null
+            : Icon(Icons.refresh, size: 16, color: c.muted),
+      );
+    }
     final exposure = (_info?['exposure'] as Map?) ?? const {};
     final provider = exposure['provider']?.toString() ?? 'unknown';
     final state = exposure['state']?.toString() ?? 'unknown';
     final url =
         exposure['url']?.toString() ?? _info?['public_url']?.toString() ?? '';
+    final reason = _error == null
+        ? null
+        : friendlyErrorText(
+            _error,
+            base: Uri.tryParse(AppScope.of(context).baseUrl),
+          );
     final label = switch (provider) {
       'none' => 'Loopback only, published by your own tunnel or proxy',
       'tailscale' => 'Tailscale serve (tailnet only)',
@@ -258,7 +277,7 @@ class _ExposureTileState extends State<_ExposureTile> with BridgeAccess {
         style: monoStyle(context, size: 12),
       ),
       subtitle: Text(
-        _error ?? '$label · $status${url.isEmpty ? '' : '\n$url'}',
+        reason ?? '$label · $status${url.isEmpty ? '' : '\n$url'}',
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
         style: monoStyle(context, size: 10.5, color: c.muted),
@@ -307,14 +326,14 @@ class SettingsScreen extends StatelessWidget {
             ),
             Divider(color: c.rule, height: 1),
           ],
-          _Section('Connection'),
+          _Section('Exposure'),
           const _ExposureTile(),
           Divider(color: c.rule, height: 1),
           _Section('Bridge'),
           ListTile(
             title: Text('Endpoint', style: monoStyle(context, size: 12)),
             subtitle: Text(
-              bridge == null ? 'Not connected' : state.baseUrl,
+              bridge == null ? 'not connected' : state.baseUrl,
               style: monoStyle(context, size: 11, color: c.muted),
             ),
             trailing: Text(
@@ -325,7 +344,7 @@ class SettingsScreen extends StatelessWidget {
           ListTile(
             title: Text('Reconnect', style: monoStyle(context, size: 12)),
             subtitle: Text(
-              'Enter the bridge URL and token again',
+              'Enter the bridge address and token again',
               style: monoStyle(context, size: 11, color: c.muted),
             ),
             onTap: () => Navigator.of(context)
@@ -601,32 +620,17 @@ Future<void> _openRepo(BuildContext context) async {
 
 /// disconnect sits one tap from other settings, so it asks first
 Future<void> _confirmDisconnect(BuildContext context, AppState state) async {
-  final c = context.colors;
-  final yes = await showDialog<bool>(
-    context: context,
-    builder: (ctx) => AlertDialog(
-      title: Text('Disconnect?', style: nameStyle(ctx, size: 18)),
-      content: Text(
+  final yes = await confirmDialog(
+    context,
+    title: 'Disconnect?',
+    body:
         'Droves stops reading this bridge. Saved bridges and their tokens stay '
         'on this device, so you can reconnect without retyping anything.',
-        style: monoStyle(ctx, size: 12, color: c.muted),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(ctx).pop(false),
-          child: const Text('Keep connected'),
-        ),
-        TextButton(
-          onPressed: () => Navigator.of(ctx).pop(true),
-          child: Text(
-            'Disconnect',
-            style: TextStyle(color: Theme.of(ctx).colorScheme.error),
-          ),
-        ),
-      ],
-    ),
+    cancelLabel: 'Keep connected',
+    confirmLabel: 'Disconnect',
+    destructive: true,
   );
-  if (yes == true) await state.disconnect();
+  if (yes) await state.disconnect();
 }
 
 class _BatteryOptimizationTile extends StatefulWidget {

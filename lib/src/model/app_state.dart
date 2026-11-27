@@ -6,10 +6,9 @@ import 'package:material_ui/material_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../bridge/bridge.dart';
+import '../bridge/decode.dart';
 import '../updates.dart';
 
-/// one saved bridge; the endpoint is what Droves dials,
-/// the connection is what it reads inside it
 class Endpoint {
   Endpoint({required this.url, required this.token, this.label = ''});
 
@@ -26,13 +25,21 @@ class Endpoint {
   Map<String, dynamic> toJson() => {'url': url, 'token': token, 'label': label};
 
   factory Endpoint.fromJson(Map<String, dynamic> j) => Endpoint(
-    url: (j['url'] as String?) ?? '',
-    token: (j['token'] as String?) ?? '',
-    label: (j['label'] as String?) ?? '',
+    url: str(j['url']),
+    token: str(j['token']),
+    label: str(j['label']),
   );
 }
 
-/// persistent connection settings plus the live bridge handle
+bool sameOriginAsPage(String url, {Uri? page}) {
+  final u = Uri.tryParse(url);
+  final base = page ?? Uri.base;
+  return u != null &&
+      u.scheme == base.scheme &&
+      u.host == base.host &&
+      u.port == base.port;
+}
+
 class AppState extends ChangeNotifier with WidgetsBindingObserver {
   AppState();
 
@@ -42,30 +49,24 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   static const _kNotifyCompleted = 'droves.notify_completed';
   static const _kNotifyBlocked = 'droves.notify_blocked';
   static const _kNotifyScout = 'droves.notify_scout';
-  // legacy key from when the assistant was called Ranger
   static const _kNotifyRanger = 'droves.notify_ranger';
   static const _kAutoReconnect = 'droves.auto_reconnect';
   static const _kThemeMode = 'droves.theme_mode';
 
   Bridge? bridge;
 
-  /// every saved bridge, most recently used first
   List<Endpoint> endpoints = const [];
 
-  /// index into [endpoints] for the live connection
   int activeIndex = 0;
 
-  // read on every event; kept in memory, written back only on change
   bool notificationsEnabled = true;
   bool notifyCompleted = true;
   bool notifyBlocked = true;
   bool notifyScout = false;
   bool autoReconnect = true;
 
-  /// persisted so a restart keeps the theme
   ThemeMode themeMode = ThemeMode.system;
 
-  /// runtime identity and the latest build advertised by the serving bridge
   String currentVersion = '';
   UpdateInfo? update;
   bool updateChecking = false;
@@ -75,13 +76,10 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   bool _reconnecting = false;
   bool _disposed = false;
 
-  /// false in the background; notifications only when the user can't see the screen
   bool foreground = true;
 
-  /// set by `main` so the bridge relays task events without importing the notification plugin
   void Function(TaskNotice notice)? onNotice;
 
-  /// notification tap request consumed by the shell to open the target pane
   TaskNotice? _tappedNotice;
   TaskNotice? get tappedNotice => _tappedNotice;
   set tappedNotice(TaskNotice? value) {
@@ -92,15 +90,12 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     foreground = state == AppLifecycleState.resumed;
-    // Android drops backgrounded sockets silently; dial again on resume
     if (state == AppLifecycleState.resumed) {
       _probeOnResume();
       checkForUpdates();
     }
   }
 
-  /// Chrome can freeze a tab and kill its socket silently; ping to prove
-  /// the link, failure flips state and schedules the reconnect
   Future<void> _probeOnResume() async {
     final current = bridge;
     if (current != null && current.state == BridgeState.ready) {
@@ -135,9 +130,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         // a corrupt entry must not cost the user the other endpoints
       }
     }
-    // web cannot dial another origin, so a browser keeps only its own bridge
     endpoints = kIsWeb
-        ? saved.where((e) => _sameOriginAsPage(e.url)).toList()
+        ? saved.where((e) => sameOriginAsPage(e.url)).toList()
         : saved;
     final stored = prefs.getInt(_kActive) ?? 0;
     activeIndex = (stored >= 0 && stored < endpoints.length) ? stored : 0;
@@ -165,7 +159,6 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
-  /// silent checks: offline or no manifest must not error over the user's screen
   Future<void> checkForUpdates({bool silent = true}) async {
     if (updateChecking) return;
     final checked = lastUpdateCheck;
@@ -242,7 +235,6 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     await prefs.setBool(_kAutoReconnect, value);
   }
 
-  /// user-initiated retry from a screen's error state; ignores backoff
   Future<void> reconnect() async {
     if (endpoints.isEmpty) return;
     final current = bridge;
@@ -250,10 +242,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     await useEndpoint(activeIndex);
   }
 
-  /// bounded retries with backoff: a resume can land before the network is up
   Future<void> _ensureConnected() async {
     if (_disposed || !autoReconnect || endpoints.isEmpty) return;
-    // a redial in flight owns the swap; joining would dispose its half-built socket
     while (_reconnecting) {
       await Future<void>.delayed(const Duration(milliseconds: 200));
       if (_disposed) return;
@@ -281,7 +271,6 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
-  /// live socket closed on its own
   void _onBridgeState(BridgeState state) {
     notifyListeners();
     if (state == BridgeState.idle && autoReconnect) {
@@ -297,30 +286,20 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     await prefs.setInt(_kActive, activeIndex);
   }
 
-  /// a browser page can only reach the bridge that served it: the bridge sends no CORS headers, pins its WebSocket to the page's Origin and its session cookie is SameSite=Strict
-  bool _sameOriginAsPage(String url) {
-    final u = Uri.tryParse(url);
-    return u != null &&
-        u.scheme == Uri.base.scheme &&
-        u.host == Uri.base.host &&
-        u.port == Uri.base.port &&
-        u.path == Uri.base.path;
-  }
-
   /// re-adding the same URL replaces the stored token instead of growing the list
   Future<void> connect(String url, String password, {String label = ''}) async {
     final normalised = url.trim().endsWith('/') ? url.trim() : '${url.trim()}/';
     final uri = Uri.parse(normalised);
     if (!uri.hasScheme || uri.host.isEmpty) {
       throw BridgeError(
-        'Enter a bridge URL, e.g. https://machine.example.com/',
+        'Enter the bridge address, e.g. https://machine.example.com/',
       );
     }
-    if (kIsWeb && !_sameOriginAsPage(normalised)) {
+    if (kIsWeb && !sameOriginAsPage(normalised)) {
       throw BridgeError(
-        'This web page can only reach the bridge that served it '
-        '(${Uri.base.origin}). Open that machine\'s bridge page instead, '
-        'or use the app to switch machines.',
+        'This page can only reach the bridge that served it '
+        '(${Uri.base.origin}). Open that machine\'s own page, or use the app '
+        'to switch machines.',
       );
     }
     final trimmedToken = password.trim();
@@ -389,7 +368,6 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 }
 
-/// makes [AppState] available without pulling in a package
 class AppScope extends InheritedNotifier<AppState> {
   const AppScope({super.key, required AppState state, required super.child})
     : super(notifier: state);
@@ -397,7 +375,6 @@ class AppScope extends InheritedNotifier<AppState> {
   static AppState of(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<AppScope>()!.notifier!;
 
-  /// null outside the app shell, e.g. a widget test that only mounts one screen
   static AppState? maybeOf(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<AppScope>()?.notifier;
 }

@@ -5,9 +5,12 @@ import 'package:material_ui/material_ui.dart';
 import '../bridge/bridge.dart';
 import '../model/app_state.dart';
 import '../theme/tokens.dart';
-import 'connect_screen.dart';
+import 'common/bridge_access.dart';
+import 'common/scaffold.dart';
+import 'common/state_message.dart';
+import 'common/status_group.dart';
+import 'screen_loader.dart';
 import 'workspace_screen.dart';
-import 'widgets.dart';
 
 /// what is running, and which of it is waiting on you
 class InboxScreen extends StatefulWidget {
@@ -17,10 +20,9 @@ class InboxScreen extends StatefulWidget {
   State<InboxScreen> createState() => _InboxScreenState();
 }
 
-class _InboxScreenState extends State<InboxScreen> with BridgeAccess {
+class _InboxScreenState extends State<InboxScreen>
+    with BridgeAccess, ScreenLoader {
   List<WorkspaceInfo> _workspaces = const [];
-  bool _loading = false;
-  String? _error;
   Timer? _poll;
 
   @override
@@ -39,78 +41,42 @@ class _InboxScreenState extends State<InboxScreen> with BridgeAccess {
   }
 
   Future<void> _load({bool silent = false}) async {
-    final live = app.bridge;
-    if (live == null || live.state != BridgeState.ready) {
-      if (mounted) {
-        setState(() {
-          _loading = false;
-        });
-      }
-      return;
-    }
-    if (!silent && mounted) setState(() => _loading = true);
-    try {
-      final next = await live.workspaces();
+    if (!app.connected) return idle();
+    await load(() async {
+      final next = await bridge.workspaces();
       if (!mounted) return;
-      setState(() {
-        _workspaces = next;
-        _loading = false;
-        _error = null;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = e.toString();
-      });
-    }
+      setState(() => _workspaces = next);
+    }, silent: silent);
   }
 
   @override
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
-    if (state.bridge == null || state.state == BridgeState.failed) {
+    // one layout for every non-ready state: flipping between the centred
+    // message and the list body on a retry read as a jump upward
+    if (state.bridge == null || state.state != BridgeState.ready) {
+      final status = connectionSubtitle(context, error);
       return DrovesScaffold(
         title: 'Droves',
-        subtitle: const LedgerLabel('not connected'),
-        child: Center(
-          child: StateMessage(
-            headline: state.error?.isNotEmpty == true
-                ? 'Connection failed'
-                : 'No bridge connected',
-            body: state.error?.isNotEmpty == true
-                ? state.error!
-                : 'Connect to the machine that runs your agents.',
-            icon: Icons.cable_outlined,
-            action: FilledButton(
-              onPressed: () => Navigator.of(
-                context,
-              ).push(MaterialPageRoute(builder: (_) => const ConnectScreen())),
-              child: Text(
-                'Add bridge',
-                style: Theme.of(context).textTheme.labelLarge
-                    ?.copyWith(color: Theme.of(context).colorScheme.onPrimary),
-              ),
-            ),
-          ),
-        ),
+        subtitle: LedgerLabel(status.isEmpty ? 'not connected' : status),
+        child: Center(child: BridgeDownState(error: error)),
       );
     }
 
     final waiting = _workspaces.where((w) => w.agentStatus == 'blocked').length;
     final working = _workspaces.where((w) => w.agentStatus == 'working').length;
-    final status = connectionSubtitle(context, _error);
+    final status = connectionSubtitle(context, error);
     final connectionLabel = status.isEmpty ? null : status;
 
     return DrovesScaffold(
       title: 'Inbox',
       subtitle: LedgerLabel(
         connectionLabel ??
-            (_loading
+            (loading
                 ? 'reading machines'
                 : '${_workspaces.length} spaces · $working working · $waiting waiting'),
       ),
-      actions: [RefreshButton(busy: _loading, onPressed: () => _load())],
+      actions: [RefreshButton(busy: loading, onPressed: () => _load())],
       child: RefreshIndicator(
         color: context.colors.ink,
         onRefresh: () => _load(),
@@ -121,11 +87,10 @@ class _InboxScreenState extends State<InboxScreen> with BridgeAccess {
 
   Widget _buildBody(BuildContext context) {
     final c = context.colors;
-    final live = app.bridge;
-    final connected = live != null && live.state == BridgeState.ready;
+    final connected = app.connected;
     final state = ScreenState(
-      loading: _loading && _workspaces.isEmpty,
-      error: _error,
+      loading: loading && _workspaces.isEmpty,
+      error: error,
       connected: connected,
       empty: _workspaces.isEmpty,
       subject: 'workspaces',
@@ -135,23 +100,34 @@ class _InboxScreenState extends State<InboxScreen> with BridgeAccess {
       rows: 6,
       emptyIcon: Icons.inbox_outlined,
     );
-    if (_loading && _workspaces.isEmpty ||
+    if (loading && _workspaces.isEmpty ||
         !connected ||
-        _error != null ||
+        error != null ||
         _workspaces.isEmpty) {
       return ListView(children: [state]);
     }
-    return ListView.separated(
-      itemCount: _workspaces.length,
-      separatorBuilder: (_, _) => Divider(color: c.rule, height: 1),
-      itemBuilder: (_, i) => _WorkspaceRow(
-        workspace: _workspaces[i],
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => WorkspaceScreen(workspace: _workspaces[i]),
+    final sections = statusSections(_workspaces, (w) => w.agentStatus);
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      children: [
+        for (final section in sections) ...[
+          StatusSectionHeader(
+            group: section.group,
+            count: section.items.length,
           ),
-        ),
-      ),
+          for (var i = 0; i < section.items.length; i++) ...[
+            if (i > 0) Divider(color: c.rule, height: 1),
+            _WorkspaceRow(
+              workspace: section.items[i],
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => WorkspaceScreen(workspace: section.items[i]),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ],
     );
   }
 }

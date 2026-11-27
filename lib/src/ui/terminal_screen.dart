@@ -9,12 +9,16 @@ import 'package:xterm/xterm.dart' hide TerminalKey;
 import 'package:xterm/xterm.dart' as xt show TerminalKey;
 
 import '../bridge/bridge.dart';
+import '../bridge/decode.dart';
+import '../bridge/failure.dart';
 import '../model/app_state.dart';
 import '../model/keybar.dart';
+import '../model/terminal_wheel.dart';
 import '../theme/tokens.dart';
 import 'chat_screen.dart';
+import 'common/scaffold.dart';
+import 'common/state_message.dart';
 import 'key_bar.dart';
-import 'widgets.dart';
 
 /// xterm's default keytab has no bare Space record, so shift+space (IME
 /// shifted key events) is swallowed; emit the space before the keytab runs.
@@ -182,7 +186,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() => _message = e.toString());
+      setState(() => _message = friendlyErrorText(e));
     }
   }
 
@@ -217,7 +221,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
     if (live == null || live.state != BridgeState.ready) return;
     try {
       final r = await live.call('agent.list', {});
-      final agents = (r['agents'] as List?) ?? const [];
+      final agents = maps(r['agents']);
       String? agent;
       var status = 'unknown';
       for (final raw in agents) {
@@ -288,9 +292,11 @@ class _TerminalScreenState extends State<TerminalScreen> {
       final staged = await _bridge.upload(file.name, bytes);
       await _bridge.paste(widget.pane.terminalId, '${staged.path} ');
       _focus.requestFocus();
-      _toast('Attached ${staged.name}');
+      if (!mounted) return;
+      showToast(context, 'Attached ${staged.name}');
     } catch (e) {
-      _toast('Could not attach: $e');
+      if (!mounted) return;
+      showError(context, e);
     } finally {
       if (mounted) setState(() => _uploading = false);
     }
@@ -300,15 +306,17 @@ class _TerminalScreenState extends State<TerminalScreen> {
   Future<void> _pasteFromClipboard() async {
     final data = await Clipboard.getData(Clipboard.kTextPlain);
     final text = data?.text;
+    if (!mounted) return;
     if (text == null || text.isEmpty) {
-      _toast('Clipboard is empty');
+      showToast(context, 'Clipboard is empty');
       return;
     }
     try {
       await _bridge.paste(widget.pane.terminalId, text);
       _focus.requestFocus();
     } catch (e) {
-      _toast(e.toString());
+      if (!mounted) return;
+      showError(context, e);
     }
   }
 
@@ -317,20 +325,15 @@ class _TerminalScreenState extends State<TerminalScreen> {
     if (selection == null) return;
     final text = _terminal.buffer.getText(selection);
     if (text.isEmpty) {
-      _toast('Nothing selected');
+      if (!mounted) return;
+      showToast(context, 'Nothing selected');
       return;
     }
     await Clipboard.setData(ClipboardData(text: text));
     _controller.clearSelection();
     _focus.requestFocus();
-    _toast('Copied');
-  }
-
-  void _toast(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message, style: monoStyle(context, size: 12))),
-    );
+    showToast(context, 'Copied');
   }
 
   /// scrollback lives on the server; drags become scroll RPCs
@@ -357,6 +360,18 @@ class _TerminalScreenState extends State<TerminalScreen> {
     _bridge.resize(widget.pane.terminalId, c, r).catchError((_) {});
   }
 
+  /// alt-screen apps own their history, so a phone drag becomes a wheel report
+  /// instead of a scrollback RPC: jcode, vim and friends only repaint on those
+  void _wheelScroll(int lines) {
+    final sequence = wheelSequence(
+      lines: lines,
+      cols: _terminal.viewWidth,
+      rows: _terminal.viewHeight,
+    );
+    if (sequence.isEmpty) return;
+    _bridge.input(widget.pane.terminalId, sequence).catchError((_) {});
+  }
+
   void _scrollToBottom() {
     // ask the server for the live tail; a local jump only moves the widget
     _bridge
@@ -379,21 +394,15 @@ class _TerminalScreenState extends State<TerminalScreen> {
   Widget build(BuildContext context) {
     final c = context.colors;
     final agent = _agent;
+    final status = connectionSubtitle(context, null);
     return DrovesScaffold(
       title: widget.workspaceLabel,
       subtitle: Row(
         children: [
           // a dead socket leaves the last grid on screen; say so instead of
           // letting a frozen terminal look live
-          if (connectionSubtitle(context, null).isNotEmpty)
-            Flexible(
-              child: Text(
-                connectionSubtitle(context, null),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: monoStyle(context, size: 10, color: c.muted),
-              ),
-            )
+          if (status.isNotEmpty)
+            Flexible(child: LedgerLabel(status))
           else ...[
             StatusWord(_agentStatus),
             const SizedBox(width: Space.sm),
@@ -543,10 +552,11 @@ class _TerminalScreenState extends State<TerminalScreen> {
                         ),
                       ),
                     ),
-                  // alt-screen apps own their scrollback; wheel goes to xterm
-                  if (_attached && !_altBuffer)
+                  if (_attached)
                     Positioned.fill(
-                      child: _ServerScrollCatcher(onScroll: _serverScroll),
+                      child: _ServerScrollCatcher(
+                        onScroll: _agent == null ? _serverScroll : _wheelScroll,
+                      ),
                     ),
                   if (_attached && _scrollOffset > 0)
                     Positioned(

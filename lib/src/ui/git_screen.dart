@@ -3,41 +3,14 @@ import 'dart:async';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:material_ui/material_ui.dart';
 
-import '../bridge/bridge.dart';
+import '../bridge/decode.dart';
+import '../model/commit_info.dart';
+import '../model/diff_entry.dart';
 import '../theme/tokens.dart';
-import 'widgets.dart';
-
-class DiffEntry {
-  DiffEntry({
-    required this.path,
-    required this.staged,
-    required this.untracked,
-    this.kind = 'unstaged',
-    this.oldPath,
-    this.additions = 0,
-    this.deletions = 0,
-  });
-
-  final String path;
-  final bool staged;
-  final bool untracked;
-
-  /// `git.diff_file` defaults to `unstaged`; staged/untracked files need this forwarded or the patch is empty
-  final String kind;
-  final String? oldPath;
-  final int additions;
-  final int deletions;
-
-  factory DiffEntry.fromJson(Map<String, dynamic> j) => DiffEntry(
-    path: (j['path'] as String?) ?? '',
-    staged: j['staged'] == true || j['kind'] == 'staged',
-    untracked: j['untracked'] == true || j['kind'] == 'untracked',
-    kind: (j['kind'] as String?) ?? 'unstaged',
-    oldPath: j['old_path'] as String?,
-    additions: (j['additions'] as num?)?.toInt() ?? 0,
-    deletions: (j['deletions'] as num?)?.toInt() ?? 0,
-  );
-}
+import 'common/bridge_access.dart';
+import 'common/scaffold.dart';
+import 'common/state_message.dart';
+import 'dialogs.dart';
 
 /// hidden when any path segment starts with a dot, matching the Files browser
 bool _hasHiddenSegment(String path) =>
@@ -125,8 +98,7 @@ class _GitScreenState extends State<GitScreen>
       final r = await bridge.call('git.diff_summary', {
         'workspace_id': widget.workspace,
       });
-      final entries = ((r['entries'] as List?) ?? const [])
-          .cast<Map<String, dynamic>>()
+      final entries = maps(r['entries'])
           .map(DiffEntry.fromJson)
           .where((e) => _showHidden || !_hasHiddenSegment(e.path))
           .toList();
@@ -149,66 +121,49 @@ class _GitScreenState extends State<GitScreen>
   }
 
   Future<void> _pull() async {
-    final ok = await _confirm(
+    final ok = await confirmDialog(
       context,
-      'Pull this branch?',
-      'Fast-forward only. Stops if the branches diverged.',
+      title: 'Pull this branch?',
+      body: 'Fast-forward only. Stops if the branches diverged.',
     );
-    if (ok != true) return;
+    if (!ok) return;
     setState(() => _pulling = true);
     try {
       final r = await bridge.call('git.pull', {
         'workspace_id': widget.workspace,
       });
       if (!mounted) return;
-      _toast('Pull: ${(r['summary'] as String?) ?? 'Done'}');
+      showToast(context, 'Pull: ${(r['summary'] as String?) ?? 'Done'}');
       await _load();
     } catch (e) {
-      if (mounted) _toast('Pull failed: $e');
+      if (mounted) showError(context, e);
     } finally {
       if (mounted) setState(() => _pulling = false);
     }
   }
 
   Future<void> _push() async {
-    final c = context.colors;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (dialog) => AlertDialog(
-        title: Text('Push this branch?', style: nameStyle(context, size: 16)),
-        content: Text(
+    final ok = await confirmDialog(
+      context,
+      title: 'Push this branch?',
+      body:
           'Pushes the current branch to origin. Commits local to this machine '
           'leave the machine only when you confirm.',
-          style: monoStyle(context, size: 12, color: c.muted),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialog).pop(false),
-            child: Text('Cancel', style: monoStyle(context, size: 12)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(dialog).pop(true),
-            child: Text(
-              'Push',
-              style: monoStyle(context, size: 12, color: c.accent),
-            ),
-          ),
-        ],
-      ),
+      confirmLabel: 'Push',
     );
-    if (ok != true) return;
+    if (!ok) return;
     setState(() => _pushing = true);
     try {
       final r = await bridge.call('git.push', {
         'workspace_id': widget.workspace,
       });
       if (!mounted) return;
-      final branch = (r['branch'] as String?) ?? '';
+      final branch = str(r['branch']);
       final summary = ((r['summary'] as String?) ?? 'Done').split('\n').last;
-      _toast('Push $branch: $summary');
+      showToast(context, 'Push $branch: $summary');
       await _load();
     } catch (e) {
-      if (mounted) _toast('Push failed: $e');
+      if (mounted) showError(context, e);
     } finally {
       if (mounted) setState(() => _pushing = false);
     }
@@ -217,47 +172,17 @@ class _GitScreenState extends State<GitScreen>
   Future<void> _commit() async {
     final selected = _selectedEntries;
     if (selected.isEmpty) {
-      _toast('Select files to commit');
+      showToast(context, 'Select files to commit');
       return;
     }
-    final c = context.colors;
-    final controller = TextEditingController(text: _messageDraft);
-    final message = await showDialog<String>(
-      context: context,
-      builder: (dialog) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(Radii.card),
-        ),
-        title: Text(
-          'Commit ${selected.length} file(s)',
-          style: nameStyle(context, size: 17),
-        ),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLines: 4,
-          style: monoStyle(context, size: 12),
-          decoration: const InputDecoration(hintText: 'Commit message'),
-          onChanged: _saveDraft,
-          onSubmitted: (v) => Navigator.of(dialog).pop(v.trim()),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialog).pop(),
-            child: Text(
-              'Cancel',
-              style: monoStyle(context, size: 12, color: c.muted),
-            ),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(dialog).pop(controller.text.trim()),
-            child: Text(
-              'Commit',
-              style: monoStyle(context, size: 12, color: c.ink),
-            ),
-          ),
-        ],
-      ),
+    final message = await promptText(
+      context,
+      title: 'Commit ${selected.length} file(s)',
+      hint: 'Commit message',
+      confirmLabel: 'Commit',
+      initial: _messageDraft,
+      maxLines: 4,
+      onChanged: _saveDraft,
     );
     if (message == null || message.isEmpty || !mounted) return;
     try {
@@ -267,25 +192,23 @@ class _GitScreenState extends State<GitScreen>
         'paths': selected.map((e) => e.path).toList(),
       });
       if (!mounted) return;
-      final sha = (r['sha'] as String?) ?? '';
-      _toast('Committed ${sha.length > 7 ? sha.substring(0, 7) : sha}'.trim());
+      final sha = str(r['sha']);
+      showToast(
+        context,
+        'Committed ${sha.length > 7 ? sha.substring(0, 7) : sha}'.trim(),
+      );
       await _saveDraft('');
       _selected.clear();
       await _load();
     } catch (e) {
-      if (mounted) _toast('$e');
+      if (mounted) showError(context, e);
     }
-  }
-
-  void _toast(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message, style: monoStyle(context, size: 12))),
-    );
   }
 
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
+    final connected = app.connected;
     final status = connectionSubtitle(context, _error);
     return DrovesScaffold(
       title: 'Changes',
@@ -303,79 +226,87 @@ class _GitScreenState extends State<GitScreen>
         onPressed: () => Navigator.of(context).maybePop(),
       ),
       actions: [
-        if (_entries.isNotEmpty && _selected.length < _entries.length)
+        if (connected) ...[
+          if (_entries.isNotEmpty && _selected.length < _entries.length)
+            IconButton(
+              icon: const Icon(Icons.select_all, size: 20),
+              color: c.ink,
+              tooltip: 'Select all',
+              style: IconButton.styleFrom(
+                splashFactory: NoSplash.splashFactory,
+              ),
+              onPressed: () =>
+                  setState(() => _selected.addAll(_entries.map((e) => e.path))),
+            ),
+          if (_selected.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.deselect, size: 20),
+              color: c.ink,
+              tooltip: 'Unselect all',
+              style: IconButton.styleFrom(
+                splashFactory: NoSplash.splashFactory,
+              ),
+              onPressed: () => setState(() => _selected.clear()),
+            ),
+          if (_selected.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.check, size: 20),
+              color: c.accent,
+              tooltip: 'Commit selected files',
+              style: IconButton.styleFrom(
+                splashFactory: NoSplash.splashFactory,
+              ),
+              onPressed: _commit,
+            ),
           IconButton(
-            icon: const Icon(Icons.select_all, size: 20),
+            icon: Icon(
+              _showHidden
+                  ? Icons.visibility_outlined
+                  : Icons.visibility_off_outlined,
+              size: 20,
+            ),
             color: c.ink,
-            tooltip: 'Select all',
+            tooltip: _showHidden ? 'Hide hidden files' : 'Show hidden files',
             style: IconButton.styleFrom(splashFactory: NoSplash.splashFactory),
-            onPressed: () =>
-                setState(() => _selected.addAll(_entries.map((e) => e.path))),
+            onPressed: _toggleHidden,
           ),
-        if (_selected.isNotEmpty)
-          IconButton(
-            icon: const Icon(Icons.deselect, size: 20),
-            color: c.ink,
-            tooltip: 'Unselect all',
-            style: IconButton.styleFrom(splashFactory: NoSplash.splashFactory),
-            onPressed: () => setState(() => _selected.clear()),
-          ),
-        if (_selected.isNotEmpty)
-          IconButton(
-            icon: const Icon(Icons.check, size: 20),
-            color: c.accent,
-            tooltip: 'Commit selected files',
-            style: IconButton.styleFrom(splashFactory: NoSplash.splashFactory),
-            onPressed: _commit,
-          ),
-        IconButton(
-          icon: Icon(
-            _showHidden
-                ? Icons.visibility_outlined
-                : Icons.visibility_off_outlined,
-            size: 20,
-          ),
-          color: c.ink,
-          tooltip: _showHidden ? 'Hide hidden files' : 'Show hidden files',
-          style: IconButton.styleFrom(splashFactory: NoSplash.splashFactory),
-          onPressed: _toggleHidden,
-        ),
-        PopupMenuButton<String>(
-          icon: const Icon(Icons.more_vert, size: 20),
-          color: c.paper,
-          tooltip: 'Repository',
-          onSelected: (v) => switch (v) {
-            'pull' => _pull(),
-            'push' => _push(),
-            _ => _load(),
-          },
-          itemBuilder: (_) => [
-            PopupMenuItem(
-              value: 'refresh',
-              enabled: !_pulling,
-              child: Text(
-                'Refresh',
-                style: monoStyle(context, size: 12, color: c.ink),
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert, size: 20),
+            color: c.paper,
+            tooltip: 'Repository',
+            onSelected: (v) => switch (v) {
+              'pull' => _pull(),
+              'push' => _push(),
+              _ => _load(),
+            },
+            itemBuilder: (_) => [
+              PopupMenuItem(
+                value: 'refresh',
+                enabled: !_pulling,
+                child: Text(
+                  'Refresh',
+                  style: monoStyle(context, size: 12, color: c.ink),
+                ),
               ),
-            ),
-            PopupMenuItem(
-              value: 'pull',
-              enabled: !_pulling,
-              child: Text(
-                _pulling ? 'Pulling…' : 'Pull branch',
-                style: monoStyle(context, size: 12, color: c.ink),
+              PopupMenuItem(
+                value: 'pull',
+                enabled: !_pulling,
+                child: Text(
+                  _pulling ? 'Pulling…' : 'Pull branch',
+                  style: monoStyle(context, size: 12, color: c.ink),
+                ),
               ),
-            ),
-            PopupMenuItem(
-              value: 'push',
-              enabled: !_pushing,
-              child: Text(
-                _pushing ? 'Pushing…' : 'Push branch',
-                style: monoStyle(context, size: 12, color: c.ink),
+              PopupMenuItem(
+                value: 'push',
+                enabled: !_pushing,
+                child: Text(
+                  _pushing ? 'Pushing…' : 'Push branch',
+                  style: monoStyle(context, size: 12, color: c.ink),
+                ),
               ),
-            ),
-          ],
-        ),
+            ],
+          ),
+        ],
       ],
       child: _buildBody(context),
     );
@@ -421,16 +352,15 @@ class _GitScreenState extends State<GitScreen>
       });
       await _load();
     } catch (err) {
-      if (mounted) _toast('$err');
+      if (mounted) showError(context, err);
     }
   }
 
   Widget _buildBody(BuildContext context) {
     final c = context.colors;
-    final live = app.bridge;
-    final connected = live != null && live.state == BridgeState.ready;
+    final connected = app.connected;
     final state = ScreenState(
-      loading: _loading,
+      loading: _loading && _entries.isEmpty,
       error: _error,
       connected: connected,
       empty: _entries.isEmpty,
@@ -540,7 +470,7 @@ class _DiffScreenState extends State<DiffScreen> with BridgeAccess {
       });
       if (!mounted) return;
       setState(() {
-        _patch = (r['patch'] as String?) ?? (r['diff'] as String?) ?? '';
+        _patch = (r['patch'] as String?) ?? str(r['diff']);
         _loading = false;
         _error = null;
       });
@@ -556,11 +486,11 @@ class _DiffScreenState extends State<DiffScreen> with BridgeAccess {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    final live = app.bridge;
-    final connected = live != null && live.state == BridgeState.ready;
+    final connected = app.connected;
+    final status = connectionSubtitle(context, _error);
     return DrovesScaffold(
       title: widget.path.split('/').last,
-      subtitle: LedgerLabel(widget.path),
+      subtitle: LedgerLabel(status.isNotEmpty ? status : widget.path),
       leading: IconButton(
         icon: const Icon(Icons.arrow_back, size: 20),
         color: c.ink,
@@ -569,7 +499,7 @@ class _DiffScreenState extends State<DiffScreen> with BridgeAccess {
       ),
       child: _loading || !connected || _error != null || _patch.isEmpty
           ? ScreenState(
-              loading: _loading,
+              loading: _loading && _patch.isEmpty,
               error: _error,
               connected: connected,
               empty: _patch.isEmpty,
@@ -612,33 +542,6 @@ class _DiffScreenState extends State<DiffScreen> with BridgeAccess {
   }
 }
 
-class CommitInfo {
-  CommitInfo({
-    required this.sha,
-    required this.shortSha,
-    required this.subject,
-    required this.author,
-    required this.authoredAt,
-    this.tags = const [],
-  });
-
-  final String sha;
-  final String shortSha;
-  final String subject;
-  final String author;
-  final String authoredAt;
-  final List<String> tags;
-
-  factory CommitInfo.fromJson(Map<String, dynamic> j) => CommitInfo(
-    sha: (j['sha'] as String?) ?? '',
-    shortSha: (j['short_sha'] as String?) ?? '',
-    subject: (j['subject'] as String?) ?? '',
-    author: (j['author'] as String?) ?? '',
-    authoredAt: (j['authored_at'] as String?) ?? '',
-    tags: (j['tags'] as List?)?.cast<String>().toList() ?? const [],
-  );
-}
-
 /// recent commits, read-only; tapping one shows its patch
 class CommitsScreen extends StatefulWidget {
   const CommitsScreen({
@@ -671,10 +574,7 @@ class _CommitsScreenState extends State<CommitsScreen> with BridgeAccess {
       });
       if (!mounted) return;
       setState(() {
-        _commits = ((r['commits'] as List?) ?? const [])
-            .cast<Map<String, dynamic>>()
-            .map(CommitInfo.fromJson)
-            .toList();
+        _commits = maps(r['commits']).map(CommitInfo.fromJson).toList();
         _head = r['head'] as String?;
         _loading = false;
         _error = null;
@@ -691,10 +591,14 @@ class _CommitsScreenState extends State<CommitsScreen> with BridgeAccess {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
+    final connected = app.connected;
+    final status = connectionSubtitle(context, _error);
     return DrovesScaffold(
       title: 'Commits',
       subtitle: LedgerLabel(
-        _head == null
+        status.isNotEmpty
+            ? status
+            : _head == null
             ? widget.label
             : 'head ${_head!.substring(0, _head!.length.clamp(0, 7))}',
       ),
@@ -704,24 +608,16 @@ class _CommitsScreenState extends State<CommitsScreen> with BridgeAccess {
         tooltip: 'Back',
         onPressed: () => Navigator.of(context).maybePop(),
       ),
-      actions: [
-        IconButton(
-          icon: const Icon(Icons.refresh, size: 20),
-          color: c.ink,
-          tooltip: 'Refresh',
-          onPressed: _load,
-        ),
-      ],
+      actions: [if (connected) RefreshButton(busy: _loading, onPressed: _load)],
       child: _buildBody(context),
     );
   }
 
   Widget _buildBody(BuildContext context) {
     final c = context.colors;
-    final live = app.bridge;
-    final connected = live != null && live.state == BridgeState.ready;
+    final connected = app.connected;
     final state = ScreenState(
-      loading: _loading,
+      loading: _loading && _commits.isEmpty,
       error: _error,
       connected: connected,
       empty: _commits.isEmpty,
@@ -834,10 +730,7 @@ class _CommitScreenState extends State<CommitScreen> with BridgeAccess {
       });
       if (!mounted) return;
       setState(() {
-        _files = ((r['entries'] as List?) ?? const [])
-            .cast<Map<String, dynamic>>()
-            .map(DiffEntry.fromJson)
-            .toList();
+        _files = maps(r['entries']).map(DiffEntry.fromJson).toList();
         _base = r['base'] as String?;
         _loading = false;
         _error = null;
@@ -854,11 +747,13 @@ class _CommitScreenState extends State<CommitScreen> with BridgeAccess {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    final live = app.bridge;
-    final connected = live != null && live.state == BridgeState.ready;
+    final connected = app.connected;
+    final status = connectionSubtitle(context, _error);
     return DrovesScaffold(
       title: widget.commit.subject,
-      subtitle: LedgerLabel(widget.commit.shortSha),
+      subtitle: LedgerLabel(
+        status.isNotEmpty ? status : widget.commit.shortSha,
+      ),
       leading: IconButton(
         icon: const Icon(Icons.arrow_back, size: 20),
         color: c.ink,
@@ -867,7 +762,7 @@ class _CommitScreenState extends State<CommitScreen> with BridgeAccess {
       ),
       child: _loading || !connected || _error != null || _files.isEmpty
           ? ScreenState(
-              loading: _loading,
+              loading: _loading && _files.isEmpty,
               error: _error,
               connected: connected,
               empty: _files.isEmpty,
@@ -905,31 +800,4 @@ class _CommitScreenState extends State<CommitScreen> with BridgeAccess {
             ),
     );
   }
-}
-
-Future<bool?> _confirm(BuildContext context, String title, String body) {
-  final c = context.colors;
-  return showDialog<bool>(
-    context: context,
-    builder: (dialog) => AlertDialog(
-      title: Text(title, style: nameStyle(context, size: 17)),
-      content: Text(body, style: monoStyle(context, size: 12, color: c.muted)),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(dialog).pop(false),
-          child: Text(
-            'Cancel',
-            style: monoStyle(context, size: 12, color: c.muted),
-          ),
-        ),
-        TextButton(
-          onPressed: () => Navigator.of(dialog).pop(true),
-          child: Text(
-            'Continue',
-            style: monoStyle(context, size: 12, color: c.ink),
-          ),
-        ),
-      ],
-    ),
-  );
 }

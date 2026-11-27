@@ -1,19 +1,12 @@
 import 'package:material_ui/material_ui.dart';
 
-import '../bridge/bridge.dart';
+import '../bridge/decode.dart';
+import '../model/search_hit.dart';
 import '../theme/tokens.dart';
+import 'common/bridge_access.dart';
+import 'common/scaffold.dart';
+import 'common/state_message.dart';
 import 'files_screen.dart';
-import 'widgets.dart';
-
-class SearchHit {
-  SearchHit({required this.path, this.line, this.snippet});
-
-  final String path;
-  final int? line;
-  final String? snippet;
-
-  bool get isContent => line != null;
-}
 
 /// mirrors `file.search` with both modes; one query returns name and content hits
 class SearchScreen extends StatefulWidget {
@@ -69,17 +62,15 @@ class _SearchScreenState extends State<SearchScreen> with BridgeAccess {
           'query': q,
         }),
       ]);
-      List<SearchHit> parse(Map<String, dynamic> r) =>
-          ((r['results'] as List?) ?? const [])
-              .cast<Map<String, dynamic>>()
-              .map(
-                (j) => SearchHit(
-                  path: (j['path'] as String?) ?? '',
-                  line: (j['line'] as num?)?.toInt(),
-                  snippet: j['snippet'] as String?,
-                ),
-              )
-              .toList();
+      List<SearchHit> parse(Map<String, dynamic> r) => maps(r['results'])
+          .map(
+            (j) => SearchHit(
+              path: str(j['path']),
+              line: integer(j['line']),
+              snippet: j['snippet'] as String?,
+            ),
+          )
+          .toList();
       if (!mounted) return;
       setState(() {
         _nameHits = parse(results[0]);
@@ -113,40 +104,41 @@ class _SearchScreenState extends State<SearchScreen> with BridgeAccess {
       ),
       child: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.all(Space.md),
-            child: TextField(
-              controller: _query,
-              focusNode: _focus,
-              autofocus: true,
-              textInputAction: TextInputAction.search,
-              onSubmitted: _search,
-              style: monoStyle(context, size: 13),
-              decoration: InputDecoration(
-                hintText: 'Names or contents',
-                hintStyle: monoStyle(
-                  context,
-                  size: 12,
-                  color: c.muted.withValues(alpha: 0.75),
-                ),
-                filled: true,
-                fillColor: c.surface,
-                prefixIcon: Icon(Icons.search, size: 18, color: c.muted),
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: Space.md,
-                  vertical: 14,
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(Radii.row),
-                  borderSide: BorderSide(color: c.rule),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(Radii.row),
-                  borderSide: BorderSide(color: c.ink, width: 1.5),
+          if (app.connected)
+            Padding(
+              padding: const EdgeInsets.all(Space.md),
+              child: TextField(
+                controller: _query,
+                focusNode: _focus,
+                autofocus: true,
+                textInputAction: TextInputAction.search,
+                onSubmitted: _search,
+                style: monoStyle(context, size: 13),
+                decoration: InputDecoration(
+                  hintText: 'Names or contents',
+                  hintStyle: monoStyle(
+                    context,
+                    size: 12,
+                    color: c.muted.withValues(alpha: 0.75),
+                  ),
+                  filled: true,
+                  fillColor: c.surface,
+                  prefixIcon: Icon(Icons.search, size: 18, color: c.muted),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: Space.md,
+                    vertical: 14,
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(Radii.row),
+                    borderSide: BorderSide(color: c.rule),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(Radii.row),
+                    borderSide: BorderSide(color: c.ink, width: 1.5),
+                  ),
                 ),
               ),
             ),
-          ),
           Expanded(child: _buildResults(context)),
         ],
       ),
@@ -155,9 +147,8 @@ class _SearchScreenState extends State<SearchScreen> with BridgeAccess {
 
   Widget _buildResults(BuildContext context) {
     final c = context.colors;
-    final live = app.bridge;
-    final connected = live != null && live.state == BridgeState.ready;
-    if (_searching) {
+    final connected = app.connected;
+    if (connected && _searching) {
       return ScreenState(
         loading: true,
         error: null,

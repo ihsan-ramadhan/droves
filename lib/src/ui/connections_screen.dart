@@ -1,42 +1,16 @@
 import 'package:material_ui/material_ui.dart';
 
-import '../bridge/bridge.dart';
-
+import '../bridge/decode.dart';
 import '../model/app_state.dart';
+import '../model/connection_info.dart';
 import '../theme/tokens.dart';
+import 'common/bridge_access.dart';
+import 'common/scaffold.dart';
+import 'common/state_message.dart';
 import 'connect_screen.dart';
-import 'widgets.dart';
+import 'screen_loader.dart';
 
 /// one host the bridge can reach; a bridge often fronts several (local socket, SSH, another room)
-class ConnectionInfo {
-  ConnectionInfo({
-    required this.id,
-    required this.label,
-    required this.state,
-    required this.type,
-    required this.isDefault,
-    required this.readOnly,
-    this.controlSocket,
-  });
-
-  final String id;
-  final String label;
-  final String state;
-  final String type;
-  final bool isDefault;
-  final bool readOnly;
-  final String? controlSocket;
-
-  factory ConnectionInfo.fromJson(Map<String, dynamic> j) => ConnectionInfo(
-    id: (j['id'] as String?) ?? '',
-    label: (j['label'] as String?) ?? '',
-    state: (j['state'] as String?) ?? 'unknown',
-    type: (j['type'] as String?) ?? 'local',
-    isDefault: j['is_default'] == true,
-    readOnly: j['read_only'] == true,
-    controlSocket: j['control_socket_path'] as String?,
-  );
-}
 
 /// top group: where Droves dials; bottom group: which host inside that bridge
 class ConnectionsScreen extends StatefulWidget {
@@ -47,34 +21,23 @@ class ConnectionsScreen extends StatefulWidget {
 }
 
 class _ConnectionsScreenState extends State<ConnectionsScreen>
-    with BridgeAccess {
+    with BridgeAccess, ScreenLoader {
   List<ConnectionInfo> _connections = const [];
-  bool _loading = true;
-  String? _error;
 
   @override
   void onBridgeReady() => _load();
 
   Future<void> _load() async {
-    if (mounted) setState(() => _loading = true);
-    try {
+    await load(() async {
       final r = await bridge.call('connections.list');
       if (!mounted) return;
-      setState(() {
-        _connections = ((r['connections'] as List?) ?? const [])
-            .cast<Map<String, dynamic>>()
-            .map(ConnectionInfo.fromJson)
-            .toList();
-        _loading = false;
-        _error = null;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = e.toString();
-      });
-    }
+      setState(
+        () =>
+            _connections = maps(r['connections'])
+                .map(ConnectionInfo.fromJson)
+                .toList(),
+      );
+    });
   }
 
   Future<void> _use(ConnectionInfo c) async {
@@ -91,9 +54,7 @@ class _ConnectionsScreenState extends State<ConnectionsScreen>
       );
       await _load();
     } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(content: Text(e.toString(), style: style)),
-      );
+      if (mounted) showError(context, e);
     }
   }
 
@@ -101,15 +62,14 @@ class _ConnectionsScreenState extends State<ConnectionsScreen>
   Widget build(BuildContext context) {
     final c = context.colors;
     final state = AppScope.of(context);
-    final live = app.bridge;
-    final connected = live != null && live.state == BridgeState.ready;
-    final status = connectionSubtitle(context, _error);
+    final connected = app.connected;
+    final status = connectionSubtitle(context, error);
     return DrovesScaffold(
       title: 'Machines',
       subtitle: LedgerLabel(
         status.isNotEmpty
             ? status
-            : _loading
+            : loading
             ? 'reading connections'
             : '${_connections.length} inside this bridge',
       ),
@@ -119,10 +79,10 @@ class _ConnectionsScreenState extends State<ConnectionsScreen>
         tooltip: 'Back',
         onPressed: () => Navigator.of(context).maybePop(),
       ),
-      actions: [RefreshButton(busy: _loading, onPressed: _load)],
+      actions: [if (connected) RefreshButton(busy: loading, onPressed: _load)],
       child: ListView(
         children: [
-          _GroupLabel('Bridges'),
+          _GroupLabel('Saved bridges'),
           for (var i = 0; i < state.endpoints.length; i++)
             _EndpointRow(
               endpoint: state.endpoints[i],
@@ -139,7 +99,7 @@ class _ConnectionsScreenState extends State<ConnectionsScreen>
               style: monoStyle(context, size: 12),
             ),
             subtitle: Text(
-              'Reach another machine through this bridge',
+              'Add a bridge address and token',
               style: monoStyle(context, size: 10.5, color: c.muted),
             ),
             onTap: () => Navigator.of(context)
@@ -147,10 +107,10 @@ class _ConnectionsScreenState extends State<ConnectionsScreen>
           ),
           Divider(color: c.rule, height: 1),
           _GroupLabel('Hosts in this bridge'),
-          if (_loading || _error != null || !connected || _connections.isEmpty)
+          if (loading || error != null || !connected || _connections.isEmpty)
             ScreenState(
-              loading: _loading,
-              error: _error,
+              loading: loading && _connections.isEmpty,
+              error: error,
               connected: connected,
               empty: _connections.isEmpty,
               subject: 'hosts',
@@ -183,7 +143,7 @@ class _GroupLabel extends StatelessWidget {
         Space.md,
         Space.lg,
         Space.md,
-        Space.xs,
+        Space.sm,
       ),
       child: LedgerLabel(text),
     );

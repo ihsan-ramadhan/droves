@@ -10,6 +10,10 @@ Droves is the trailhead, not the dashboard. The screen answers one question
 before anything else: **which agent is waiting on me right now?** Everything
 else is a level below it.
 
+Inbox and Agents answer it in three bands: Working, then Done, then Idle. A
+blocked agent leads Working because it still holds a turn and needs the user; an
+agent with no session falls to Idle.
+
 The motif is the **drover's tally**: a narrow left rail of counted marks, one
 per running agent, with waiting ones marked by a filled rust notch. It appears
 in the inbox, in the workspace list, and in each tab strip. It is the only

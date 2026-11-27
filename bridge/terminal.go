@@ -157,12 +157,8 @@ func (m *TerminalManager) Attach(ctx context.Context, c *Client, terminalID stri
 	sess.mu.Lock()
 	sess.paneSplit = split
 	sess.paneCols, sess.paneRows, sess.sizeAt = serverCols, serverRows, time.Now()
-	// a new viewer needs the current screen even when nothing changed since the
-	// last repaint, otherwise it attaches to a blank terminal
 	sess.last = "\x00force"
 	sess.mu.Unlock()
-	// the viewer mirrors herdr's grid and never resizes it: shell.Resize moves
-	// the whole herdr area, so a phone attach would shrink the desktop layout
 	sess.kick()
 
 	return split, serverCols, serverRows, nil
@@ -208,9 +204,6 @@ func (m *TerminalManager) stop(terminalID string, sess *TerminalSession) {
 	}
 }
 
-// Resize records one viewer's grid. Each device keeps its own, so a phone and a
-// laptop can both drive the same pane without inheriting each other's size.
-// Only a single pane is resized in herdr; a split pane keeps the desktop layout.
 func (m *TerminalManager) Resize(c *Client, terminalID string, cols, rows int) {
 	if cols < 2 || rows < 2 {
 		return
@@ -284,7 +277,6 @@ func (m *TerminalManager) Scroll(ctx context.Context, c *Client, terminalID stri
 	return offset, nil
 }
 
-// offset reports how far the viewport is from the live tail.
 func (m *TerminalManager) Offset(terminalID string) int {
 	m.mu.Lock()
 	sess := m.sessions[terminalID]
@@ -362,8 +354,6 @@ func (s *TerminalSession) repaint(ctx context.Context) error {
 		clients = append(clients, c)
 	}
 	s.mu.Unlock()
-	// herdr owns the pane grid; mirror it for every pane, split or not, and
-	// refresh after split, zoom or close. The viewer never resizes herdr.
 	if paneCols <= 0 || paneRows <= 0 || time.Since(sizeAt) > 2*time.Second {
 		if pc, pr, ps := s.mgr.paneSize(ctx, s.paneID); pc > 0 && pr > 0 {
 			cols, rows, split = pc, pr, ps
@@ -388,7 +378,6 @@ func (s *TerminalSession) repaint(ctx context.Context) error {
 	if rows < 2 {
 		rows = 30
 	}
-	// Herdr returns the visible screen, not a delta; repaint from a clean origin
 	frame := "\x1b[0m\x1b[H\x1b[2J" + text
 	b64 := base64.StdEncoding.EncodeToString([]byte(frame))
 	payload := map[string]any{"terminal": map[string]any{
@@ -409,10 +398,6 @@ func (s *TerminalSession) repaint(ctx context.Context) error {
 }
 
 func (s *TerminalSession) input(ctx context.Context, data string) error {
-	// strip bracketed paste markers; typing them literally breaks shells without the mode
-	data = strings.ReplaceAll(data, "\x1b[200~", "")
-	data = strings.ReplaceAll(data, "\x1b[201~", "")
-
 	var pending strings.Builder
 	flush := func() error {
 		if pending.Len() == 0 {
@@ -426,78 +411,94 @@ func (s *TerminalSession) input(ctx context.Context, data string) error {
 		})
 		return err
 	}
-	sendKey := func(key string) error {
+	for _, op := range parseInput(data) {
+		if op.key == "" {
+			pending.WriteString(op.text)
+			continue
+		}
 		if err := flush(); err != nil {
 			return err
 		}
 		_, err := s.mgr.srv.herdr.Call(ctx, "pane.send_keys", map[string]any{
 			"pane_id": s.paneID,
-			"keys":    []string{key},
+			"keys":    []string{op.key},
 		})
-		return err
+		if err != nil {
+			return err
+		}
+	}
+	return flush()
+}
+
+type inputOp struct {
+	key  string
+	text string
+}
+
+func parseInput(data string) []inputOp {
+	data = strings.ReplaceAll(data, "\x1b[200~", "")
+	data = strings.ReplaceAll(data, "\x1b[201~", "")
+
+	var ops []inputOp
+	var pending strings.Builder
+	sendKey := func(key string) {
+		if pending.Len() > 0 {
+			ops = append(ops, inputOp{text: pending.String()})
+			pending.Reset()
+		}
+		ops = append(ops, inputOp{key: key})
 	}
 
 	for i := 0; i < len(data); {
+		if n := mouseReportLen(data[i:]); n > 0 {
+			pending.WriteString(data[i : i+n])
+			i += n
+			continue
+		}
 		if data[i] == 0x1b {
 			if i+2 < len(data) && data[i+1] == '[' {
 				if key, used, ok := csiKey(data[i:]); ok {
-					if err := sendKey(key); err != nil {
-						return err
-					}
+					sendKey(key)
 					i += used
 					continue
 				}
 			}
 			if i+1 < len(data) && data[i+1] == 'O' && i+2 < len(data) {
 				if key, ok := ss3Key(data[i+2]); ok {
-					if err := sendKey(key); err != nil {
-						return err
-					}
+					sendKey(key)
 					i += 3
 					continue
 				}
 			}
 			if i+1 < len(data) && data[i+1] == '\x1b' {
-				if err := sendKey("esc"); err != nil {
-					return err
-				}
+				sendKey("esc")
 				i++
 				continue
 			}
 			if i+1 < len(data) {
 				if data[i+1] < 0x20 || data[i+1] == 0x7f {
-					if err := sendKey("esc"); err != nil {
-						return err
-					}
+					sendKey("esc")
 					i++
 					continue
 				}
 			}
-			if err := sendKey("esc"); err != nil {
-				return err
-			}
+			sendKey("esc")
 			i++
 			continue
 		}
 		b := data[i]
 		if b == '\r' || b == '\n' {
-			if err := sendKey("enter"); err != nil {
-				return err
-			}
+			sendKey("enter")
 			i++
 			continue
 		}
 		if b == '\t' {
-			if err := sendKey("tab"); err != nil {
-				return err
-			}
+			sendKey("tab")
 			i++
 			continue
 		}
 		if b == 0x7f || b == 0x08 {
-			if err := sendKey("backspace"); err != nil {
-				return err
-			}
+			sendKey("backspace")
 			i++
 			continue
 		}
@@ -508,9 +509,7 @@ func (s *TerminalSession) input(ctx context.Context, data string) error {
 			} else if b >= 0x1c && b <= 0x1f {
 				ch = []byte{'\\', ']', '^', '_'}[b-0x1c]
 			}
-			if err := sendKey("ctrl-" + string(ch)); err != nil {
-				return err
-			}
+			sendKey("ctrl-" + string(ch))
 			i++
 			continue
 		}
@@ -521,7 +520,36 @@ func (s *TerminalSession) input(ctx context.Context, data string) error {
 		pending.WriteString(data[i : i+size])
 		i += size
 	}
-	return flush()
+	if pending.Len() > 0 {
+		ops = append(ops, inputOp{text: pending.String()})
+	}
+	return ops
+}
+
+func mouseReportLen(s string) int {
+	if len(s) < 3 || s[0] != 0x1b || s[1] != '[' {
+		return 0
+	}
+	if s[2] == 'M' {
+		if len(s) < 6 {
+			return len(s)
+		}
+		return 6
+	}
+	if s[2] != '<' {
+		return 0
+	}
+	for j := 3; j < len(s); j++ {
+		switch {
+		case s[j] >= '0' && s[j] <= '9', s[j] == ';':
+			continue
+		case s[j] == 'M' || s[j] == 'm':
+			return j + 1
+		default:
+			return 0
+		}
+	}
+	return 0
 }
 
 func csiKey(s string) (string, int, bool) {

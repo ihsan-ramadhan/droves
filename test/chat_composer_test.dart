@@ -8,9 +8,11 @@ import 'package:droves/src/theme/tokens.dart';
 import 'package:droves/src/ui/chat_screen.dart';
 
 class _WorkingBridge extends Bridge {
-  _WorkingBridge() : super(Uri.parse('http://127.0.0.1:1'));
+  _WorkingBridge({this.agentStatus = 'working'})
+    : super(Uri.parse('http://127.0.0.1:1'));
 
   final interrupts = <String>[];
+  final String agentStatus;
 
   @override
   BridgeState get state => BridgeState.ready;
@@ -29,7 +31,7 @@ class _WorkingBridge extends Bridge {
             'terminal_id': 't1',
             'workspace_id': 'w1',
             'tab_id': 'tab1',
-            'agent_status': 'working',
+            'agent_status': agentStatus,
             'agent': 'omp',
             'cwd': '/tmp',
             'title': 'chat',
@@ -54,7 +56,7 @@ void main() {
     tester.view.devicePixelRatio = 3;
     addTearDown(tester.view.reset);
 
-    final state = AppState()..bridge = Bridge(Uri.parse('http://127.0.0.1:1'));
+    final state = AppState()..bridge = _WorkingBridge(agentStatus: 'idle');
     await tester.pumpWidget(
       AppScope(
         state: state,
@@ -127,6 +129,40 @@ void main() {
     await tester.tap(find.byTooltip('Interrupt (Esc)'));
     await tester.pump();
     expect(bridge.interrupts, ['w1:p1:\x1b']);
+
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('composer stays out of a disconnected chat', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final state = AppState()..bridge = Bridge(Uri.parse('http://127.0.0.1:1'));
+    await tester.pumpWidget(
+      AppScope(
+        state: state,
+        child: MaterialApp(
+          theme: drovesTheme(Brightness.light),
+          home: ChatScreen(
+            label: 'workspace',
+            pane: PaneInfo(
+              paneId: 'w1:p1',
+              terminalId: 't1',
+              workspaceId: 'w1',
+              tabId: 'tab1',
+              agentStatus: 'idle',
+              agent: 'omp',
+              cwd: '/tmp',
+              title: 'chat',
+              focused: true,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Bridge is not connected'), findsOneWidget);
+    expect(find.byTooltip('Send'), findsNothing);
+    expect(find.byTooltip('Terminal'), findsNothing);
 
     await tester.pumpWidget(const SizedBox());
   });
